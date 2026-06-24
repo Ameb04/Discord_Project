@@ -1,196 +1,234 @@
 # Discord Clone Project
 
-Project of Systems Analysis and Design Course
+پروژه تیمی درس تحلیل و طراحی سیستم‌ها
 
-## Technologies
+## ایده اصلی
 
-### Backend
-
-* Django
-* Django REST Framework
-* Django Channels
-* PostgreSQL
-* Redis
-* Celery
-
-### Frontend
-
-* React
-* Vite
-* TypeScript
-
-### Infrastructure
-
-* Docker
-* Docker Compose
+این پروژه با Docker و Docker Compose اجرا می‌شود تا همه‌ی اعضای تیم یک محیط یکسان داشته باشند.  
+هر نفر می‌تواند روی لپ‌تاپ خودش کانتینر جداگانه داشته باشد، اما **تعریف محیط اجرا** باید از روی Git یکی باشد.
 
 ---
 
-# First Time Setup
+## فناوری‌ها
 
-Clone repository:
+### Backend
+- Django
+- Django REST Framework
+- Django Channels
+- PostgreSQL
+- Redis
+- Celery
 
-```bash
-git clone <repo-url>
-cd Discord_Project
-```
+### Frontend
+- React
+- Vite
+- TypeScript
 
-Create environment file:
+### Infrastructure
+- Docker
+- Docker Compose
+
+---
+
+## اصل مهم هماهنگی تیم
+
+برای یکسان ماندن پروژه، این چیزها باید همیشه در Git commit شوند:
+
+- `backend/requirements.txt`
+- `frontend/package.json`
+- `frontend/package-lock.json`
+- migrationهای Django
+- `docker-compose.yml`
+- `backend/Dockerfile`
+- `frontend/Dockerfile`
+- فایل‌های کانفیگ پروژه
+
+و این چیزها نباید commit شوند:
+
+- `.env`
+- `node_modules/`
+- `__pycache__/`
+- دیتای محلی و فایل‌های موقتی
+
+---
+
+## فایل‌های اولیه‌ای که باید مبنا قرار بگیرند
+
+### 1) `.env.example`
+نمونه‌ی تمام متغیرهای محیطی پروژه است.  
+هر عضو تیم باید از روی آن `.env` بسازد:
 
 ```bash
 cp .env.example .env
 ```
 
-Build containers:
+### 2) `backend/config/settings.py`
+تنظیمات Django باید از `.env` بخواند، نه اینکه مقادیر مهم را hardcode کند.  
+مواردی مثل این‌ها باید از محیط خوانده شوند:
 
+- `SECRET_KEY`
+- `DEBUG`
+- `ALLOWED_HOSTS`
+- تنظیمات دیتابیس
+- تنظیمات Redis و Celery
+
+### 3) `backend/requirements.txt`
+هر پکیج Python که اضافه می‌شود باید اینجا ثبت و commit شود.
+
+### 4) `frontend/package.json` و `frontend/package-lock.json`
+هر پکیج npm که اضافه می‌شود باید همراه lockfile commit شود.
+
+### 5) Django appها و migrationها
+هر feature جدید بهتر است داخل یک app جدا ساخته شود، مثلاً:
+
+```bash
+docker compose exec backend python manage.py startapp accounts
+```
+
+بعد از ساخت مدل یا تغییر schema:
+
+```bash
+docker compose exec backend python manage.py makemigrations
+docker compose exec backend python manage.py migrate
+```
+
+### 6) یک فایل دستوری مشترک برای تیم
+برای اینکه همه دقیقاً یک workflow داشته باشند، بهتر است یک `Makefile` در ریشه پروژه باشد.  
+این فایل کمک می‌کند دستورهای مهم تیمی یکسان و کوتاه شوند.
+
+---
+
+## فایل‌های جدید پیشنهادی
+
+### `Makefile`
+برای استاندارد کردن دستورهای رایج:
+
+- build
+- up / down
+- migrate
+- makemigrations
+- createsuperuser
+- shell
+- نصب پکیج‌ها
+
+اگر `Makefile` را اضافه کردید، همه‌ی اعضا از همان دستورهای مشترک استفاده کنند.
+
+---
+
+## راه‌اندازی اولیه
+
+### 1) گرفتن پروژه
+```bash
+git clone <repo-url>
+cd Discord_Project
+```
+
+### 2) ساخت فایل env
+```bash
+cp .env.example .env
+```
+
+### 3) ساخت imageها
 ```bash
 docker compose build
 ```
 
-Start project:
-
+### 4) بالا آوردن پروژه
 ```bash
 docker compose up
 ```
 
-Open:
-
-Frontend:
-
-http://localhost:5173
-
-Backend:
-
-http://localhost:8000
-
----
-
-# Database Migration
-
-Create migrations:
-
-```bash
-docker compose exec backend python manage.py makemigrations
-```
-
-Apply migrations:
-
+### 5) اعمال migrationها
 ```bash
 docker compose exec backend python manage.py migrate
 ```
 
----
-
-# Create Superuser
-
+### 6) ساخت superuser
 ```bash
 docker compose exec backend python manage.py createsuperuser
 ```
 
 ---
 
-# Open Django Shell
+## روال درست کار تیمی
+
+### اگر کسی بخواهد backend توسعه دهد
+- یک app جدید بسازد یا روی app موجود کار کند
+- مدل‌ها را تغییر دهد
+- migration بسازد
+- migration را commit کند
+
+نمونه:
 
 ```bash
-docker compose exec backend python manage.py shell
+docker compose exec backend python manage.py startapp accounts
+docker compose exec backend python manage.py makemigrations
+docker compose exec backend python manage.py migrate
 ```
+
+### اگر کسی بخواهد frontend توسعه دهد
+- پکیج جدید را نصب کند
+- `package.json` و `package-lock.json` را commit کند
+- build را در صورت نیاز تست کند
+
+نمونه:
+
+```bash
+docker compose exec frontend npm install axios
+docker compose exec frontend npm run build
+```
+
+### اگر کسی بخواهد دیتابیس را تغییر دهد
+- جدول را دستی داخل PostgreSQL نسازد
+- مدل Django را تغییر دهد
+- migration بسازد
+- migration را commit کند
+
+این مهم‌ترین قانون برای یکسان ماندن schema بین همه‌ی اعضاست.
 
 ---
 
-# Run Tests
+## نکات مهم برای یکسان ماندن محیط
 
-Run all tests:
+### Dependencyها
+اگر چیزی نصب شد:
+- Python: `requirements.txt`
+- npm: `package.json` + `package-lock.json`
 
+### Database
+Schema باید فقط از طریق Django migration مدیریت شود.
+
+### Superuser و داده‌های اولیه
+`createsuperuser` برای هر نفر محلی است و commit نمی‌شود.  
+اگر داده‌ی اولیه باید ثابت باشد، از fixture یا data migration استفاده کنید.
+
+### Docker
+کانتینر هر نفر می‌تواند جدا باشد.  
+آنچه باید یکی باشد:
+- Dockerfile
+- docker-compose.yml
+- env نمونه
+- dependencyها
+- migrationها
+
+---
+
+## دستورات رایج تیم
+
+### باز کردن shell
+```bash
+docker compose exec backend bash
+docker compose exec frontend sh
+docker compose exec db psql -U app -d app
+docker compose exec redis redis-cli
+```
+
+### تست
 ```bash
 docker compose exec backend python manage.py test
 ```
 
-Run specific app tests:
-
-```bash
-docker compose exec backend python manage.py test accounts
-```
-
----
-
-# Install New Python Package
-
-Example:
-
-```bash
-docker compose exec backend pip install pillow
-```
-
-Update requirements:
-
-```bash
-docker compose exec backend pip freeze > requirements.txt
-```
-
-Rebuild image:
-
-```bash
-docker compose build backend
-```
-
----
-
-# Install New Frontend Package
-
-Example:
-
-```bash
-docker compose exec frontend npm install axios
-```
-
-Package.json automatically updates.
-
-If needed:
-
-```bash
-docker compose build frontend
-```
-
----
-
-# Open Container Terminal
-
-Backend:
-
-```bash
-docker compose exec backend bash
-```
-
-Frontend:
-
-```bash
-docker compose exec frontend sh
-```
-
-PostgreSQL:
-
-```bash
-docker compose exec db psql -U app
-```
-
-Redis:
-
-```bash
-docker compose exec redis redis-cli
-```
-
----
-
-# Stop Containers
-
-```bash
-docker compose down
-```
-
----
-
-# Rebuild Everything
-
+### rebuild کامل
 ```bash
 docker compose down
 docker compose build --no-cache
@@ -199,47 +237,31 @@ docker compose up
 
 ---
 
-# Git Workflow
-
-Create branch:
-
-```bash
-git checkout -b feature/user-authentication
-```
-
-Push branch:
-
-```bash
-git push origin feature/user-authentication
-```
-
-Create Pull Request on GitHub.
-
-Do not commit directly to main branch.
-
----
-
-# Project Structure
+## ساختار پیشنهادی پروژه
 
 ```text
 project-root/
-│
 ├── backend/
 │   ├── config/
-│   ├── apps/ (we make the apps/ like accounts/ or etc)
-│   ├── tests/
+│   ├── accounts/            # مثال: appهای Django
 │   ├── requirements.txt
 │   └── Dockerfile
-│
 ├── frontend/
-│   ├── src/ (we code frontend here)
+│   ├── src/
 │   ├── public/
+│   ├── package.json
+│   ├── package-lock.json
 │   └── Dockerfile
-│
-├── docs/ (we document project in this folder)
-│
+├── docs/
 ├── .env.example
+├── .gitignore
 ├── docker-compose.yml
-├── README.md
-└── .gitignore
+├── Makefile
+└── README.md
 ```
+
+---
+
+## قانون طلایی تیم
+
+**کد، dependency، migration و configuration باید در Git باشند؛ کانتینر فقط محیط اجراست.**
