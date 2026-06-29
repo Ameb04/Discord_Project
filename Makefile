@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .PHONY: help setup build up down logs restart \
         backend-shell frontend-shell db-shell redis-shell \
         makemigrations migrate createsuperuser test \
-        backend-install frontend-install frontend-build clean
+        backend-install frontend-install frontend-dev frontend-build clean
 
 help:
 	@echo "Targets:"
@@ -23,6 +23,7 @@ help:
 	@echo "  test                Run Django tests"
 	@echo "  backend-install PKG=package  Install a Python package in backend"
 	@echo "  frontend-install PKG=package Install an npm package in frontend"
+	@echo "  frontend-dev        Run frontend locally with pnpm (recommended)"
 	@echo "  frontend-build      Build frontend assets"
 	@echo "  clean               Remove containers, images and volumes (careful)"
 
@@ -80,6 +81,9 @@ frontend-install:
 	@if [ -z "$(PKG)" ]; then echo "Usage: make frontend-install PKG=<package>"; exit 1; fi
 	docker compose exec frontend npm install $(PKG)
 	@echo "Now commit frontend/package.json and frontend/package-lock.json."
+
+frontend-dev:
+	pnpm run dev
 
 frontend-build:
 	docker compose exec frontend npm run build

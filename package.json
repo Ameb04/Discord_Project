@@ -1,0 +1,11 @@
+{
+  "name": "discord-project",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter frontend dev",
+    "build": "pnpm --filter frontend build",
+    "lint": "pnpm --filter frontend lint",
+    "preview": "pnpm --filter frontend preview"
+  },
+  "packageManager": "pnpm@10.12.1"
+}

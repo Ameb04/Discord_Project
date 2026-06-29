@@ -1,267 +1,556 @@
 # Discord Clone Project
 
+
+
 پروژه تیمی درس تحلیل و طراحی سیستم‌ها
+
+
 
 ## ایده اصلی
 
-این پروژه با Docker و Docker Compose اجرا می‌شود تا همه‌ی اعضای تیم یک محیط یکسان داشته باشند.  
-هر نفر می‌تواند روی لپ‌تاپ خودش کانتینر جداگانه داشته باشد، اما **تعریف محیط اجرا** باید از روی Git یکی باشد.
+
+
+این پروژه یک **monorepo** است: backend با Django و frontend با React/Vite در یک مخزن Git.  
+
+برای دیتابیس، Redis و backend از Docker Compose استفاده می‌شود تا همه‌ی اعضای تیم محیط یکسان داشته باشند.  
+
+برای توسعه‌ی frontend، معمولاً **pnpm** را مستقیم روی سیستم خودتان اجرا می‌کنید (سریع‌تر و HMR بهتر).
+
+
 
 ---
+
+
 
 ## فناوری‌ها
 
+
+
 ### Backend
+
 - Django
+
 - Django REST Framework
+
 - Django Channels
+
 - PostgreSQL
+
 - Redis
+
 - Celery
 
+
+
 ### Frontend
+
 - React
+
 - Vite
+
 - TypeScript
 
+- pnpm (workspace)
+
+
+
 ### Infrastructure
+
 - Docker
+
 - Docker Compose
 
+
+
 ---
+
+
+
+## پیش‌نیازها
+
+
+
+| ابزار | نسخه پیشنهادی | برای چه کاری |
+
+|--------|----------------|--------------|
+
+| [Docker Desktop](https://www.docker.com/products/docker-desktop/) | آخرین نسخه پایدار | db، redis، backend |
+
+| [Node.js](https://nodejs.org/) | 22+ | frontend |
+
+| [pnpm](https://pnpm.io/installation) | 10+ | frontend |
+
+| [Python](https://www.python.org/) | 3.12+ | فقط اگر backend را خارج از Docker اجرا کنید |
+
+
+
+---
+
+
+
+## راه‌اندازی سریع (پیشنهادی برای توسعه)
+
+
+
+### ۱) گرفتن پروژه
+
+```bash
+
+git clone <repo-url>
+
+cd Discord_Project
+
+```
+
+
+
+### ۲) ساخت فایل env
+
+```bash
+
+cp .env.example .env
+
+```
+
+
+
+### ۳) بالا آوردن سرویس‌های backend (اولین بار)
+
+```bash
+
+docker compose build
+
+docker compose up db redis backend
+
+```
+
+
+
+در ترمینال دیگر:
+
+
+
+### ۴) نصب وابستگی‌های frontend
+
+```bash
+
+pnpm install
+
+```
+
+
+
+### ۵) اجرای frontend
+
+```bash
+
+pnpm run dev
+
+```
+
+
+
+- Frontend: http://localhost:5173  
+
+- Backend API: http://localhost:8000  
+
+- Admin: http://localhost:8000/admin  
+
+
+
+### ۶) migration و superuser (فقط بار اول)
+
+```bash
+
+docker compose exec backend python manage.py migrate
+
+docker compose exec backend python manage.py createsuperuser
+
+```
+
+
+
+---
+
+
+
+## دو روش توسعه
+
+
+
+### روش A — Hybrid (پیشنهادی)
+
+
+
+| بخش | نحوه اجرا | Hot reload |
+
+|-----|-----------|------------|
+
+| db + redis + backend | `docker compose up db redis backend` | ✅ تغییرات Python بلافاصله اعمال می‌شود |
+
+| frontend | `pnpm run dev` از ریشه پروژه | ✅ Vite HMR |
+
+
+
+**مزایا:** frontend سریع‌تر است، مصرف اینترنت کمتر (نیازی به rebuild image برای تغییر کد نیست).
+
+
+
+### روش B — همه چیز داخل Docker
+
+
+
+```bash
+
+docker compose up
+
+```
+
+
+
+frontend هم داخل کانتینر بالا می‌آید. برای تغییر کد Python یا React **نیازی به rebuild image نیست** — volume mount و autoreload فعال است.  
+
+فقط وقتی `requirements.txt` یا `package.json` عوض شد، rebuild لازم است:
+
+
+
+```bash
+
+docker compose build backend   # بعد از تغییر pip packages
+
+docker compose build frontend  # بعد از تغییر npm packages
+
+```
+
+
+
+---
+
+
+
+## دستورات رایج
+
+
+
+### Frontend (از ریشه monorepo)
+
+```bash
+
+pnpm install          # نصب وابستگی‌ها
+
+pnpm run dev          # dev server (بدون نیاز به --host)
+
+pnpm run build        # build production
+
+pnpm run lint         # eslint
+
+```
+
+
+
+### Docker / Backend
+
+```bash
+
+docker compose up db redis backend    # فقط سرویس‌های لازم backend
+
+docker compose up                     # کل stack
+
+docker compose down                   # خاموش کردن
+
+docker compose logs -f backend        # لاگ backend
+
+```
+
+
+
+### Django
+
+```bash
+
+docker compose exec backend python manage.py makemigrations
+
+docker compose exec backend python manage.py migrate
+
+docker compose exec backend python manage.py createsuperuser
+
+docker compose exec backend python manage.py test
+
+docker compose exec backend bash
+
+```
+
+
+
+### Shell سرویس‌ها
+
+```bash
+
+docker compose exec db psql -U app -d app
+
+docker compose exec redis redis-cli
+
+```
+
+
+
+### Makefile (اختیاری)
+
+```bash
+
+make setup
+
+make build
+
+make up
+
+make migrate
+
+```
+
+
+
+---
+
+
+
+## چه زمانی rebuild لازم است؟
+
+
+
+| تغییر | rebuild لازم؟ |
+
+|-------|----------------|
+
+| فایل‌های `.py` در backend | ❌ خیر — autoreload |
+
+| فایل‌های `.tsx` / `.ts` در frontend | ❌ خیر — HMR |
+
+| `backend/requirements.txt` | ✅ `docker compose build backend` |
+
+| `frontend/package.json` | ✅ `pnpm install` + در صورت Docker: `docker compose build frontend` |
+
+| `docker-compose.yml` یا Dockerfile | ✅ `docker compose build` |
+
+
+
+---
+
+
 
 ## اصل مهم هماهنگی تیم
 
-برای یکسان ماندن پروژه، این چیزها باید همیشه در Git commit شوند:
+
+
+این فایل‌ها باید در Git commit شوند:
+
+
 
 - `backend/requirements.txt`
-- `frontend/package.json`
-- `frontend/package-lock.json`
-- migrationهای Django
-- `docker-compose.yml`
-- `backend/Dockerfile`
-- `frontend/Dockerfile`
-- فایل‌های کانفیگ پروژه
 
-و این چیزها نباید commit شوند:
+- `frontend/package.json`
+
+- `frontend/pnpm-lock.yaml`
+
+- `package.json` و `pnpm-workspace.yaml` (ریشه monorepo)
+
+- migrationهای Django
+
+- `docker-compose.yml`
+
+- `backend/Dockerfile` و `frontend/Dockerfile`
+
+- `.env.example`
+
+
+
+این‌ها commit **نشوند**:
+
+
 
 - `.env`
+
 - `node_modules/`
+
 - `__pycache__/`
-- دیتای محلی و فایل‌های موقتی
+
+- دیتای محلی
+
+
 
 ---
 
-## فایل‌های اولیه‌ای که باید مبنا قرار بگیرند
 
-### 1) `.env.example`
-نمونه‌ی تمام متغیرهای محیطی پروژه است.  
-هر عضو تیم باید از روی آن `.env` بسازد:
 
-```bash
-cp .env.example .env
+## تنظیمات محیط (`.env`)
+
+
+
+فایل `.env.example` را کپی کنید. backend مقادیر را از محیط می‌خواند.
+
+
+
+برای **Hybrid dev** (backend در Docker، db روی localhost):
+
+```env
+
+POSTGRES_HOST=db
+
+REDIS_HOST=redis
+
 ```
 
-### 2) `backend/config/settings.py`
-تنظیمات Django باید از `.env` بخواند، نه اینکه مقادیر مهم را hardcode کند.  
-مواردی مثل این‌ها باید از محیط خوانده شوند:
 
-- `SECRET_KEY`
-- `DEBUG`
-- `ALLOWED_HOSTS`
-- تنظیمات دیتابیس
-- تنظیمات Redis و Celery
 
-### 3) `backend/requirements.txt`
-هر پکیج Python که اضافه می‌شود باید اینجا ثبت و commit شود.
+اگر backend را **خارج از Docker** اجرا می‌کنید ولی db/redis در Docker هستند:
 
-### 4) `frontend/package.json` و `frontend/package-lock.json`
-هر پکیج npm که اضافه می‌شود باید همراه lockfile commit شود.
+```env
 
-### 5) Django appها و migrationها
-هر feature جدید بهتر است داخل یک app جدا ساخته شود، مثلاً:
+POSTGRES_HOST=localhost
+
+REDIS_HOST=localhost
+
+```
+
+
+
+---
+
+
+
+## روال کار تیمی
+
+
+
+### Backend
 
 ```bash
+
 docker compose exec backend python manage.py startapp accounts
-```
 
-بعد از ساخت مدل یا تغییر schema:
-
-```bash
 docker compose exec backend python manage.py makemigrations
+
 docker compose exec backend python manage.py migrate
+
 ```
 
-### 6) یک فایل دستوری مشترک برای تیم
-برای اینکه همه دقیقاً یک workflow داشته باشند، بهتر است یک `Makefile` در ریشه پروژه باشد.  
-این فایل کمک می‌کند دستورهای مهم تیمی یکسان و کوتاه شوند.
 
----
 
-## فایل‌های جدید پیشنهادی
+هر پکیج Python جدید → `requirements.txt` → commit → `docker compose build backend`
 
-### `Makefile`
-برای استاندارد کردن دستورهای رایج:
 
-- build
-- up / down
-- migrate
-- makemigrations
-- createsuperuser
-- shell
-- نصب پکیج‌ها
 
-اگر `Makefile` را اضافه کردید، همه‌ی اعضا از همان دستورهای مشترک استفاده کنند.
-
----
-
-## راه‌اندازی اولیه
-
-### 1) گرفتن پروژه
-```bash
-git clone <repo-url>
-cd Discord_Project
-```
-
-### 2) ساخت فایل env
-```bash
-cp .env.example .env
-```
-
-### 3) ساخت imageها
-```bash
-docker compose build
-```
-
-### 4) بالا آوردن پروژه
-```bash
-docker compose up
-```
-
-### 5) اعمال migrationها
-```bash
-docker compose exec backend python manage.py migrate
-```
-
-### 6) ساخت superuser
-```bash
-docker compose exec backend python manage.py createsuperuser
-```
-
----
-
-## روال درست کار تیمی
-
-### اگر کسی بخواهد backend توسعه دهد
-- یک app جدید بسازد یا روی app موجود کار کند
-- مدل‌ها را تغییر دهد
-- migration بسازد
-- migration را commit کند
-
-نمونه:
+### Frontend
 
 ```bash
-docker compose exec backend python manage.py startapp accounts
-docker compose exec backend python manage.py makemigrations
-docker compose exec backend python manage.py migrate
+
+pnpm add axios --filter frontend
+
+pnpm run build
+
 ```
 
-### اگر کسی بخواهد frontend توسعه دهد
-- پکیج جدید را نصب کند
-- `package.json` و `package-lock.json` را commit کند
-- build را در صورت نیاز تست کند
 
-نمونه:
 
-```bash
-docker compose exec frontend npm install axios
-docker compose exec frontend npm run build
-```
+`package.json` و `pnpm-lock.yaml` را commit کنید.
 
-### اگر کسی بخواهد دیتابیس را تغییر دهد
-- جدول را دستی داخل PostgreSQL نسازد
-- مدل Django را تغییر دهد
-- migration بسازد
-- migration را commit کند
 
-این مهم‌ترین قانون برای یکسان ماندن schema بین همه‌ی اعضاست.
-
----
-
-## نکات مهم برای یکسان ماندن محیط
-
-### Dependencyها
-اگر چیزی نصب شد:
-- Python: `requirements.txt`
-- npm: `package.json` + `package-lock.json`
 
 ### Database
-Schema باید فقط از طریق Django migration مدیریت شود.
 
-### Superuser و داده‌های اولیه
-`createsuperuser` برای هر نفر محلی است و commit نمی‌شود.  
-اگر داده‌ی اولیه باید ثابت باشد، از fixture یا data migration استفاده کنید.
+Schema فقط از طریق Django migration — هرگز دستی در PostgreSQL.
 
-### Docker
-کانتینر هر نفر می‌تواند جدا باشد.  
-آنچه باید یکی باشد:
-- Dockerfile
-- docker-compose.yml
-- env نمونه
-- dependencyها
-- migrationها
+
 
 ---
 
-## دستورات رایج تیم
 
-### باز کردن shell
-```bash
-docker compose exec backend bash
-docker compose exec frontend sh
-docker compose exec db psql -U app -d app
-docker compose exec redis redis-cli
-```
 
-### تست
-```bash
-docker compose exec backend python manage.py test
-```
+## ساختار پروژه
 
-### rebuild کامل
-```bash
-docker compose down
-docker compose build --no-cache
-docker compose up
-```
 
----
-
-## ساختار پیشنهادی پروژه
 
 ```text
-project-root/
+
+Discord_Project/
+
 ├── backend/
+
 │   ├── config/
-│   ├── accounts/            # مثال: appهای Django
+
 │   ├── requirements.txt
+
 │   └── Dockerfile
+
 ├── frontend/
+
 │   ├── src/
-│   ├── public/
+
 │   ├── package.json
-│   ├── package-lock.json
+
+│   ├── pnpm-lock.yaml
+
 │   └── Dockerfile
-├── docs/
+
+├── package.json              # اسکریپت‌های monorepo
+
+├── pnpm-workspace.yaml
+
 ├── .env.example
-├── .gitignore
+
 ├── docker-compose.yml
+
 ├── Makefile
+
 └── README.md
+
 ```
 
+
+
 ---
+
+
+
+## عیب‌یابی
+
+
+
+### `pnpm run dev` کار نمی‌کند
+
+```bash
+
+pnpm install
+
+```
+
+مطمئن شوید Node 22+ و pnpm نصب است.
+
+
+
+### تغییرات backend در Docker دیده نمی‌شود
+
+- مطمئن شوید `docker compose up` در حال اجراست (نه فقط build یک‌باره)
+
+- در Windows، `WATCHFILES_FORCE_POLLING=true` در `docker-compose.yml` تنظیم شده است
+
+- rebuild فقط برای تغییر dependency لازم است، نه برای تغییر `.py`
+
+
+
+### frontend از Docker در دسترس نیست
+
+`host: true` در `frontend/vite.config.ts` تنظیم شده — دیگر نیازی به `--host` در خط فرمان نیست.
+
+
+
+---
+
+
 
 ## قانون طلایی تیم
 
-**کد، dependency، migration و configuration باید در Git باشند؛ کانتینر فقط محیط اجراست.**
+
+
+**کد، dependency، migration و configuration در Git؛ کانتینر فقط محیط اجراست. برای تغییر کد، rebuild نکنید — فقط up کنید.**
+
