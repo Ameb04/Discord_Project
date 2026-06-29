@@ -32,10 +32,13 @@ services:
     command: python manage.py runserver 0.0.0.0:8000
 
   frontend:
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     volumes:
-      - ./frontend:/app
+      - ./frontend:/app/frontend
       - /app/node_modules
+      - /app/frontend/node_modules
     ports:
       - "5173:5173"
     environment:
