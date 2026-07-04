@@ -32,7 +32,8 @@
 
 .app-header nav a,
 .primary-link,
-.search-form button {
+.search-form button,
+.logout-button {
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--social-bg);
@@ -58,6 +59,13 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 24px;
+}
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
 }
 
 .page-header {
@@ -120,6 +128,18 @@
   color: var(--text-h);
 }
 
+.logout-button {
+  cursor: pointer;
+  color: #b42318;
+  border-color: rgba(180, 35, 24, 0.3);
+  background: rgba(180, 35, 24, 0.08);
+}
+
+.logout-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .search-form button:disabled,
 .search-controls input:disabled {
   cursor: not-allowed;
@@ -128,6 +148,7 @@
 
 .search-controls input:focus-visible,
 .search-form button:focus-visible,
+.logout-button:focus-visible,
 .primary-link:focus-visible,
 .app-header a:focus-visible {
   outline: 2px solid var(--accent);

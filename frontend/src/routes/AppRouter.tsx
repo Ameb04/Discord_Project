@@ -1,5 +1,6 @@
 import { BrowserRouter, Link, NavLink, Route, Routes } from 'react-router-dom'
 import SearchResultsPage from '../pages/SearchResultsPage'
+import SettingsPage from '../pages/SettingsPage'
 
 function HomePage() {
   return (
@@ -26,12 +27,14 @@ function AppRouter() {
           </Link>
           <nav aria-label="Main navigation">
             <NavLink to="/search">Search</NavLink>
+            <NavLink to="/settings">Settings</NavLink>
           </nav>
         </header>
 
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/search" element={<SearchResultsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </div>
     </BrowserRouter>
