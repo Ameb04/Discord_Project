@@ -29,3 +29,10 @@ export interface AuthResponse {
   message?: string;
   detail?: string;
 }
+
+export type PublicUser = {
+  phone_number: string;
+  first_name: string;
+  last_name: string;
+  gender: Gender;
+};
