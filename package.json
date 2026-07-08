@@ -7,5 +7,9 @@
     "lint": "pnpm --filter frontend lint",
     "preview": "pnpm --filter frontend preview"
   },
-  "packageManager": "pnpm@10.12.1"
+  "packageManager": "pnpm@10.12.1",
+  "dependencies": {
+    "axios": "^1.18.1",
+    "react-router-dom": "^7.18.1"
+  }
 }
