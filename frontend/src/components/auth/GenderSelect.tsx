@@ -19,9 +19,6 @@ export function GenderSelect({ value, onChange, label }: GenderSelectProps) {
         <option value="female" className="text-black">
           Female
         </option>
-        <option value="other" className="text-black">
-          Other
-        </option>
       </select>
     </label>
   );
