@@ -6,8 +6,8 @@ export async function getMe() {
   return response.data;
 }
 
-export async function searchUsers(query: string): Promise<User[]> {
-  const response = await client.get<User[]>("/api/users/search/", {
+export async function searchUsers(query: string): Promise<PublicUser[]> {
+  const response = await client.get<PublicUser[]>("/api/users/search/", {
     params: { q: query },
   });
 
