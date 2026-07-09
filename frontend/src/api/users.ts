@@ -33,3 +33,8 @@ export async function getUserProfile(phoneNumber: string): Promise<PublicUser> {
 
   return response.data;
 }
+
+export async function updateMe(data: Partial<User>) {
+  const response = await client.patch<User>("/api/auth/me/", data);
+  return response.data;
+}

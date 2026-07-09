@@ -5,9 +5,17 @@ export type User = {
   username?: string;
   display_name?: string;
   avatar_url?: string | null;
+
+  first_name?: string;
+  last_name?: string;
+
   full_name?: string;
   phone_number?: string;
   gender?: Gender;
+
+  can_be_added_to_group?: boolean;
+  tag?: number | null;
+
   created_at?: string;
   updated_at?: string;
 };
