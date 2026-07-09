@@ -3,65 +3,81 @@ import { useParams } from "react-router-dom";
 import { getUserProfile } from "../api/users";
 import type { PublicUser } from "../types/user";
 
-export default function ProfilePage() {
-  const { phone_number } = useParams();
+function ProfilePage() {
+  const { phone_number } = useParams<{ phone_number: string }>();
 
   const [user, setUser] = useState<PublicUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-
   useEffect(() => {
-    if (!phone_number) {
-      setError("Invalid user");
-      setLoading(false);
-      return;
+    async function loadProfile() {
+      if (!phone_number) {
+        setError("Invalid user.");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const data = await getUserProfile(phone_number);
+        setUser(data);
+      } catch {
+        setError("Unable to load profile.");
+      } finally {
+        setLoading(false);
+      }
     }
 
-    getUserProfile(phone_number)
-      .then(setUser)
-      .catch(() => {
-        setError("Failed to load profile");
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-
+    loadProfile();
   }, [phone_number]);
 
-
   if (loading) {
-    return <div>Loading profile...</div>;
+    return (
+      <main className="page-shell">
+        <p>Loading profile...</p>
+      </main>
+    );
   }
-
 
   if (error) {
-    return <div>{error}</div>;
+    return (
+      <main className="page-shell">
+        <p>{error}</p>
+      </main>
+    );
   }
-
 
   if (!user) {
-    return <div>User not found</div>;
+    return (
+      <main className="page-shell">
+        <p>User not found.</p>
+      </main>
+    );
   }
 
-
   return (
-    <div className="p-6">
+    <main className="page-shell">
+      <section className="profile-page">
+        <div className="user-avatar">
+          {user.first_name.charAt(0).toUpperCase()}
+        </div>
 
-      <h1 className="text-2xl font-bold">
-        {user.first_name} {user.last_name}
-      </h1>
+        <h1>
+          {user.first_name} {user.last_name}
+        </h1>
 
+        <div className="profile-info">
+          <p>
+            <strong>Phone:</strong> {user.phone_number}
+          </p>
 
-      <p>
-        Phone: {user.phone_number}
-      </p>
-
-
-      <p>
-        Gender: {user.gender}
-      </p>
-
-    </div>
+          <p>
+            <strong>Gender:</strong> {user.gender}
+          </p>
+        </div>
+      </section>
+    </main>
   );
 }
+
+export default ProfilePage;

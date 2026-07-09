@@ -1,24 +1,31 @@
-import type { User } from '../types/user'
+import { useNavigate } from "react-router-dom";
+import type { PublicUser } from "../types/user";
 
 type UserCardProps = {
-  user: User
-}
+  user: PublicUser;
+};
 
 function UserCard({ user }: UserCardProps) {
-  const name = user.display_name || user.username
-  const initial = name.trim().charAt(0).toUpperCase() || '?'
+  const navigate = useNavigate();
+
+  const name = `${user.first_name} ${user.last_name}`.trim();
+  const initial = name.charAt(0).toUpperCase() || "?";
 
   return (
-    <li className="user-card">
+    <li
+      className="user-card"
+      onClick={() => navigate(`/profile/${user.phone_number}`)}
+    >
       <div className="user-avatar" aria-hidden="true">
-        {user.avatar_url ? <img src={user.avatar_url} alt="" /> : initial}
+        {initial}
       </div>
+
       <div className="user-card-body">
         <strong>{name}</strong>
-        <span>@{user.username}</span>
+        <span>{user.phone_number}</span>
       </div>
     </li>
-  )
+  );
 }
 
-export default UserCard
+export default UserCard;
