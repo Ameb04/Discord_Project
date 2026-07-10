@@ -1,4 +1,6 @@
 import { Link } from "react-router-dom";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import type { PublicUser } from "../types/user";
 
 type UserCardProps = {
@@ -21,16 +23,19 @@ function UserCard({ user }: UserCardProps) {
         className="group flex min-h-24 items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4 shadow-lg shadow-black/20 transition hover:border-white/20 hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70"
         aria-label={`View ${displayName}'s profile`}
       >
-        <div
-          className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white/10 text-sm font-semibold text-white"
-          aria-hidden="true"
-        >
-          {initials}
-        </div>
+        <Avatar className="size-12 shrink-0">
+          {user.avatar_url ? <AvatarImage src={user.avatar_url} alt={displayName} /> : null}
+          <AvatarFallback>{initials}</AvatarFallback>
+        </Avatar>
 
         <div className="min-w-0 flex-1">
           <p className="truncate font-semibold text-white">{displayName}</p>
           <p className="mt-1 truncate text-sm text-white/50">{user.phone_number}</p>
+          {user.tag ? (
+            <Badge variant="secondary" className="mt-2">
+              {user.tag.title}
+            </Badge>
+          ) : null}
         </div>
 
         <span className="shrink-0 text-sm font-medium text-white/45 transition group-hover:text-white/75">

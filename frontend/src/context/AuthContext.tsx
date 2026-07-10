@@ -7,7 +7,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { login as loginRequest, register as registerRequest } from "../api/auth";
+import {
+  login as loginRequest,
+  logout as logoutRequest,
+  register as registerRequest,
+  ensureCsrfCookie,
+} from "../api/auth";
 import { getMe } from "../api/users";
 import type { LoginPayload, RegisterPayload, User } from "../types/user";
 
@@ -19,7 +24,7 @@ interface AuthContextValue {
   login: (payload: LoginPayload) => Promise<User | null>;
   register: (payload: RegisterPayload) => Promise<User | null>;
   refreshMe: () => Promise<User | null>;
-  logout: () => void;
+  logout: () => Promise<void>;
   clearError: () => void;
 }
 
@@ -28,14 +33,23 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 function extractErrorMessage(error: unknown): string {
   if (typeof error === "object" && error !== null) {
     const maybeAxiosError = error as {
-      response?: { data?: { detail?: string; message?: string } };
+      response?: { data?: Record<string, unknown> };
       message?: string;
     };
 
-    const detail = maybeAxiosError.response?.data?.detail;
-    const message = maybeAxiosError.response?.data?.message;
-    if (detail) return detail;
-    if (message) return message;
+    const data = maybeAxiosError.response?.data;
+    if (typeof data === "object" && data !== null) {
+      const detail = data.detail;
+      const message = data.message;
+      if (typeof detail === "string") return detail;
+      if (typeof message === "string") return message;
+
+      const firstFieldError = Object.values(data).find((value) => Array.isArray(value) && value.length > 0);
+      if (Array.isArray(firstFieldError) && typeof firstFieldError[0] === "string") {
+        return firstFieldError[0];
+      }
+    }
+
     if (maybeAxiosError.message) return maybeAxiosError.message;
   }
 
@@ -67,12 +81,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [fetchMeWithoutLoading]);
 
   useEffect(() => {
-  async function loadUser() {
-    await refreshMe();
-  }
+    async function loadUser() {
+      try {
+        await ensureCsrfCookie();
+      } catch {
+        // CSRF bootstrap is best-effort; writes will retry after a fresh cookie.
+      }
 
-  void loadUser();
-}, [refreshMe]);
+      await refreshMe();
+    }
+
+    void loadUser();
+  }, [refreshMe]);
 
   const login = useCallback(
     async (payload: LoginPayload) => {
@@ -80,8 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(null);
 
       try {
-        const response = await loginRequest(payload);
-        const nextUser = response.user ?? (await fetchMeWithoutLoading());
+        const nextUser = await loginRequest(payload);
         setUser(nextUser);
         return nextUser;
       } catch (err) {
@@ -93,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
       }
     },
-    [fetchMeWithoutLoading]
+    []
   );
 
   const register = useCallback(
@@ -102,8 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(null);
 
       try {
-        const response = await registerRequest(payload);
-        const nextUser = response.user ?? (await fetchMeWithoutLoading());
+        const nextUser = await registerRequest(payload);
         setUser(nextUser);
         return nextUser;
       } catch (err) {
@@ -115,12 +133,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
       }
     },
-    [fetchMeWithoutLoading]
+    []
   );
 
-  const logout = useCallback(() => {
-    setUser(null);
+  const logout = useCallback(async () => {
     setError(null);
+
+    try {
+      await logoutRequest();
+    } catch {
+      // Clear local state even if the server session is already gone.
+    }
+
+    setUser(null);
   }, []);
 
   const clearError = useCallback(() => setError(null), []);

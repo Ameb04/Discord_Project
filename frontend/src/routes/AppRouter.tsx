@@ -18,7 +18,9 @@ function LoadingScreen() {
 }
 
 function RootRoute() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) return <LoadingScreen />;
   return isAuthenticated ? <Navigate to="/search" replace /> : <LandingPage />;
 }
 

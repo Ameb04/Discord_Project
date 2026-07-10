@@ -22,3 +22,4 @@ htmlcov/
 .ruff_cache/
 .tox/
 .nox/
+media/

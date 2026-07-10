@@ -7,6 +7,13 @@ import { CountryPhoneField } from "../components/auth/CountryPhoneField";
 import { GenderSelect } from "../components/auth/GenderSelect";
 import { TextField } from "../components/auth/TextField";
 
+function splitFullName(fullName: string): { first_name: string; last_name: string } {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  const first_name = parts[0] ?? "";
+  const last_name = parts.slice(1).join(" ");
+  return { first_name, last_name };
+}
+
 export function SignupPage() {
   const navigate = useNavigate();
   const { register, error, clearError } = useAuth();
@@ -30,8 +37,10 @@ export function SignupPage() {
     }
 
     setSubmitting(true);
+    const { first_name, last_name } = splitFullName(fullName);
     const user = await register({
-      full_name: fullName.trim(),
+      first_name,
+      last_name,
       phone_number: `${countryCode}${phoneNumber.trim()}`,
       gender,
       password,

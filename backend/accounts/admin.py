@@ -12,7 +12,7 @@ class UserAdmin(BaseUserAdmin):
 
     fieldsets = (
         (None, {"fields": ("phone_number", "password")}),
-        ("Personal info", {"fields": ("first_name", "last_name", "gender", "tag")}),
+        ("Personal info", {"fields": ("first_name", "last_name", "gender", "avatar", "tag")}),
         ("Preferences", {"fields": ("can_be_added_to_group",)}),
         (
             "Permissions",

@@ -45,6 +45,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     last_name = models.CharField(max_length=150, blank=True)
     gender = models.CharField(max_length=10, choices=Gender.choices, blank=True)
     can_be_added_to_group = models.BooleanField(default=True)
+    avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
     tag = models.ForeignKey(
         "core.Tag",
         null=True,
