@@ -26,12 +26,15 @@ export async function getUser(phone_number: string): Promise<User> {
   return response.data;
 }
 
-export async function getUserProfile(
-  phone_number: string
-): Promise<PublicUser> {
+export async function getUserProfile(phoneNumber: string): Promise<PublicUser> {
   const response = await client.get<PublicUser>(
-    `/api/users/${phone_number}/`
+    `/api/users/${phoneNumber}/`
   );
 
+  return response.data;
+}
+
+export async function updateMe(data: Partial<User>) {
+  const response = await client.patch<User>("/api/auth/me/", data);
   return response.data;
 }

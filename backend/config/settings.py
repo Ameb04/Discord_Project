@@ -49,7 +49,13 @@ INSTALLED_APPS = [
     'corsheaders',
     'channels',
     # project apps
+    'core',
+    'accounts',
+    'chats',
+    'messaging',
 ]
+
+AUTH_USER_MODEL = 'accounts.User'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -62,7 +68,26 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+}
+
+# SPA sends the session cookie cross-origin, so allow specific origins with
+# credentials (a wildcard origin is not allowed alongside credentials).
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        'CORS_ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173'
+    ).split(',')
+    if origin.strip()
+]
+CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
 
 ASGI_APPLICATION = "config.asgi.application"
 
