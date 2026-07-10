@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { useNavigate } from "react-router-dom";
 
-import { logout as logoutRequest } from "../api/auth";
+import { logout as logoutRequest, changePassword } from "../api/auth";
 
 import { getMe, getTags, updateMe, updateMeWithAvatar } from "../api/users";
 
@@ -10,7 +10,41 @@ import { useAuth } from "../context/AuthContext";
 
 import type { Gender, Tag, User } from "../types/user";
 
+function extractPasswordError(error: unknown): string {
+  if (typeof error === "object" && error !== null) {
+    const maybeAxiosError = error as {
+      response?: { data?: Record<string, unknown> };
+      message?: string;
+    };
 
+    const data = maybeAxiosError.response?.data;
+    if (typeof data === "object" && data !== null) {
+      const detail = data.detail;
+      if (typeof detail === "string") return detail;
+
+      const currentPasswordError = data.current_password;
+      if (Array.isArray(currentPasswordError) && typeof currentPasswordError[0] === "string") {
+        return currentPasswordError[0];
+      }
+
+      const newPasswordError = data.new_password;
+      if (Array.isArray(newPasswordError) && typeof newPasswordError[0] === "string") {
+        return newPasswordError[0];
+      }
+
+      const firstFieldError = Object.values(data).find(
+        (value) => Array.isArray(value) && value.length > 0
+      );
+      if (Array.isArray(firstFieldError) && typeof firstFieldError[0] === "string") {
+        return firstFieldError[0];
+      }
+    }
+
+    if (maybeAxiosError.message) return maybeAxiosError.message;
+  }
+
+  return "Could not update your password. Please try again.";
+}
 
 function SettingsPage() {
 
@@ -37,16 +71,14 @@ function SettingsPage() {
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
 
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
-
+  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
 
-
-
   const [isSaving, setIsSaving] = useState(false);
-
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-
   const [error, setError] = useState("");
+  const [passwordMessage, setPasswordMessage] = useState("");
 
 
 
@@ -175,6 +207,33 @@ function SettingsPage() {
   }
 
 
+
+  async function handleChangePassword() {
+    if (!currentPassword || !newPassword) {
+      setPasswordMessage("");
+      setError("Enter both your current and new password.");
+      return;
+    }
+
+    setIsChangingPassword(true);
+    setError("");
+    setPasswordMessage("");
+
+    try {
+      await changePassword({
+        current_password: currentPassword,
+        new_password: newPassword,
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setPasswordMessage("Password updated successfully.");
+    } catch (err) {
+      const message = extractPasswordError(err);
+      setError(message);
+    } finally {
+      setIsChangingPassword(false);
+    }
+  }
 
   async function handleLogout() {
 
@@ -425,41 +484,38 @@ function SettingsPage() {
 
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/30 sm:p-6">
-
         <h2 className="font-semibold text-white">Password</h2>
 
-
-
         <input
-
           type="password"
-
-          value={newPassword}
-
-          onChange={(e) => setNewPassword(e.target.value)}
-
-          placeholder="New password"
-
+          value={currentPassword}
+          onChange={(e) => setCurrentPassword(e.target.value)}
+          placeholder="Current password"
+          autoComplete="current-password"
           className="mt-4 h-11 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 text-sm text-white placeholder:text-white/35 focus:border-white/20 focus:outline-none"
-
         />
 
-
+        <input
+          type="password"
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          placeholder="New password"
+          autoComplete="new-password"
+          className="mt-4 h-11 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 text-sm text-white placeholder:text-white/35 focus:border-white/20 focus:outline-none"
+        />
 
         <button
-
           type="button"
-
-          disabled
-
-          className="mt-4 inline-flex h-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-5 text-sm font-medium text-white/40"
-
+          disabled={isChangingPassword || !currentPassword || !newPassword}
+          onClick={handleChangePassword}
+          className="mt-4 inline-flex h-11 items-center justify-center rounded-2xl border border-white/20 bg-white/10 px-5 text-sm font-semibold text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
         >
-
-          Change password (Backend required)
-
+          {isChangingPassword ? "Updating..." : "Change password"}
         </button>
 
+        {passwordMessage ? (
+          <p className="mt-3 text-sm text-emerald-200/80">{passwordMessage}</p>
+        ) : null}
       </section>
 
 

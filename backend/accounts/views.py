@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from .authentication import app_login, app_logout
 from .models import User
 from .serializers import (
+    ChangePasswordSerializer,
     LoginSerializer,
     PublicUserSerializer,
     RegisterSerializer,
@@ -62,6 +63,18 @@ class LogoutView(APIView):
     def post(self, request):
         app_logout(request)
         return Response({"detail": "Logged out."})
+
+
+class ChangePasswordView(APIView):
+    """POST /api/auth/change-password/ - update the current user's password."""
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"detail": "Password updated."})
 
 
 class MeView(generics.RetrieveUpdateAPIView):
