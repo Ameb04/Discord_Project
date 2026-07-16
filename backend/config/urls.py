@@ -27,6 +27,7 @@ urlpatterns = [
     path('api/auth/', include((auth_patterns, 'auth'))),
     path('api/users/', include((user_patterns, 'users'))),
     path('api/tags/', TagListView.as_view(), name='tag-list'),
+    path('api/chats/', include('chats.urls')),
 ]
 
 if settings.DEBUG:

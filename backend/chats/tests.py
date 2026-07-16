@@ -1,6 +1,8 @@
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from rest_framework.test import APIClient
 
+from accounts.authentication import APP_USER_SESSION_KEY
 from accounts.models import User
 
 from .models import (
@@ -214,3 +216,101 @@ class DirectChatServiceTests(TestCase):
             ValueError, "Cannot start a direct chat with yourself."
         ):
             get_or_create_direct_chat(self.alice, self.alice)
+
+
+class DirectChatApiTests(TestCase):
+    url = "/api/chats/direct/"
+
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            phone_number="1000", password="password"
+        )
+        self.bob = User.objects.create_user(phone_number="2000", password="password")
+
+    def authenticated_client(self, user):
+        client = APIClient()
+        session = client.session
+        session[APP_USER_SESSION_KEY] = user.pk
+        session.save()
+        return client
+
+    def test_authenticated_user_creates_direct_chat(self):
+        client = self.authenticated_client(self.alice)
+
+        response = client.post(self.url, {"target_user": self.bob.pk}, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["type"], "direct")
+        self.assertTrue(response.data["created"])
+        self.assertEqual(response.data["other_user"]["phone_number"], self.bob.pk)
+        self.assertEqual(Pv.objects.count(), 1)
+
+    def test_repeated_request_returns_same_chat(self):
+        client = self.authenticated_client(self.alice)
+
+        first_response = client.post(
+            self.url, {"target_user": self.bob.pk}, format="json"
+        )
+        second_response = client.post(
+            self.url, {"target_user": self.bob.pk}, format="json"
+        )
+
+        self.assertEqual(first_response.status_code, 201)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.data["id"], first_response.data["id"])
+        self.assertFalse(second_response.data["created"])
+        self.assertEqual(Pv.objects.count(), 1)
+
+    def test_reversed_user_pair_returns_same_chat(self):
+        alice_client = self.authenticated_client(self.alice)
+        bob_client = self.authenticated_client(self.bob)
+
+        first_response = alice_client.post(
+            self.url, {"target_user": self.bob.pk}, format="json"
+        )
+        second_response = bob_client.post(
+            self.url, {"target_user": self.alice.pk}, format="json"
+        )
+
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.data["id"], first_response.data["id"])
+        self.assertEqual(second_response.data["other_user"]["phone_number"], self.alice.pk)
+        self.assertEqual(Pv.objects.count(), 1)
+
+    def test_self_chat_is_rejected(self):
+        client = self.authenticated_client(self.alice)
+
+        response = client.post(self.url, {"target_user": self.alice.pk}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("target_user", response.data)
+
+    def test_missing_target_user_is_rejected(self):
+        client = self.authenticated_client(self.alice)
+
+        response = client.post(self.url, {}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("target_user", response.data)
+
+    def test_unknown_target_user_returns_404(self):
+        client = self.authenticated_client(self.alice)
+
+        response = client.post(self.url, {"target_user": "9999"}, format="json")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_unauthenticated_request_is_rejected(self):
+        response = APIClient().post(self.url, {"target_user": self.bob.pk}, format="json")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_only_one_pv_exists_for_same_user_pair(self):
+        alice_client = self.authenticated_client(self.alice)
+        bob_client = self.authenticated_client(self.bob)
+
+        alice_client.post(self.url, {"target_user": self.bob.pk}, format="json")
+        alice_client.post(self.url, {"target_user": self.bob.pk}, format="json")
+        bob_client.post(self.url, {"target_user": self.alice.pk}, format="json")
+
+        self.assertEqual(Pv.objects.count(), 1)
