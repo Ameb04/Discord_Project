@@ -12,6 +12,15 @@ class TextMessageCreateSerializer(serializers.Serializer):
     )
 
 
+class MediaMessageCreateSerializer(serializers.Serializer):
+    file = serializers.FileField()
+    content = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        trim_whitespace=False,
+    )
+
+
 class NormalMessageSerializer(serializers.ModelSerializer):
     chat = serializers.PrimaryKeyRelatedField(read_only=True)
     sender = serializers.SerializerMethodField()
@@ -27,4 +36,11 @@ class NormalMessageSerializer(serializers.ModelSerializer):
         return PublicUserSerializer(obj.sender, context=self.context).data
 
     def get_attachment(self, obj):
-        return None
+        if obj.file is None:
+            return None
+        return {
+            "id": obj.file_id,
+            "name": obj.file.name,
+            "type": obj.file.type,
+            "size": obj.file.size,
+        }

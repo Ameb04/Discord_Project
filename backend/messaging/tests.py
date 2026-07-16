@@ -326,6 +326,229 @@ class MessageListCreateApiTests(TestCase):
         )
 
 
+class MediaMessageUploadApiTests(TestCase):
+    def setUp(self):
+        self.temp_dir = TemporaryDirectory()
+        self.private_root = Path(self.temp_dir.name) / "private"
+        self.public_root = Path(self.temp_dir.name) / "media"
+        self.settings_override = override_settings(
+            PRIVATE_MEDIA_ROOT=self.private_root,
+            MEDIA_ROOT=self.public_root,
+        )
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
+        self.addCleanup(self.temp_dir.cleanup)
+
+        self.owner = User.objects.create_user(
+            phone_number="1000", password="password"
+        )
+        self.member = User.objects.create_user(
+            phone_number="2000", password="password"
+        )
+        self.third_user = User.objects.create_user(
+            phone_number="3000", password="password"
+        )
+
+    def authenticated_client(self, user):
+        client = APIClient()
+        session = client.session
+        session[APP_USER_SESSION_KEY] = user.pk
+        session.save()
+        return client
+
+    def media_url(self, chat):
+        return f"/api/chats/{chat.pk}/messages/media/"
+
+    def create_pv(self):
+        pv = Pv.objects.create(name="Direct chat")
+        PvMembership.objects.create(pv=pv, user=self.owner)
+        PvMembership.objects.create(pv=pv, user=self.member)
+        return pv
+
+    def create_group(self):
+        group = Group.objects.create(name="Group chat", owner=self.owner)
+        GroupMembership.objects.create(group=group, user=self.member)
+        return group
+
+    def test_authorized_pv_member_can_upload_media(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.member)
+
+        response = client.post(
+            self.media_url(pv),
+            {
+                "file": self.upload("report.pdf", b"pdf bytes", "application/pdf"),
+                "content": "Quarterly report",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["chat"], pv.pk)
+        self.assertEqual(response.data["sender"]["phone_number"], self.member.pk)
+        self.assertEqual(response.data["content"], "Quarterly report")
+        self.assertEqual(response.data["attachment"]["name"], "report.pdf")
+        self.assertEqual(response.data["attachment"]["type"], "application/pdf")
+        self.assertEqual(response.data["attachment"]["size"], 9)
+        self.assert_private_file_exists(File.objects.get())
+
+    def test_unauthorized_pv_user_cannot_upload(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.third_user)
+
+        response = client.post(
+            self.media_url(pv),
+            {"file": self.upload("secret.txt", b"secret", "text/plain")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assert_no_messages_files_or_private_uploads()
+
+    def test_authorized_group_owner_and_member_can_upload(self):
+        group = self.create_group()
+
+        owner_response = self.authenticated_client(self.owner).post(
+            self.media_url(group),
+            {"file": self.upload("owner.txt", b"owner", "text/plain")},
+            format="multipart",
+        )
+        member_response = self.authenticated_client(self.member).post(
+            self.media_url(group),
+            {"file": self.upload("member.txt", b"member", "text/plain")},
+            format="multipart",
+        )
+
+        self.assertEqual(owner_response.status_code, 201)
+        self.assertEqual(member_response.status_code, 201)
+        self.assertEqual(NormalMessage.objects.count(), 2)
+        self.assertEqual(File.objects.count(), 2)
+
+    def test_unauthorized_group_user_cannot_upload(self):
+        group = self.create_group()
+        client = self.authenticated_client(self.third_user)
+
+        response = client.post(
+            self.media_url(group),
+            {"file": self.upload("nope.txt", b"nope", "text/plain")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assert_no_messages_files_or_private_uploads()
+
+    def test_missing_file_is_rejected(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.owner)
+
+        response = client.post(
+            self.media_url(pv),
+            {"content": "missing file"},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assert_no_messages_files_or_private_uploads()
+
+    def test_empty_file_is_rejected(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.owner)
+
+        response = client.post(
+            self.media_url(pv),
+            {"file": self.upload("empty.txt", b"", "text/plain")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assert_no_messages_files_or_private_uploads()
+
+    def test_nonexistent_chat_returns_404(self):
+        client = self.authenticated_client(self.owner)
+
+        response = client.post(
+            "/api/chats/9999/messages/media/",
+            {"file": self.upload("file.txt", b"hello", "text/plain")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_unauthenticated_request_is_rejected(self):
+        pv = self.create_pv()
+
+        response = APIClient().post(
+            self.media_url(pv),
+            {"file": self.upload("file.txt", b"hello", "text/plain")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assert_no_messages_files_or_private_uploads()
+
+    def test_successful_upload_creates_one_message_and_one_file(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.owner)
+
+        response = client.post(
+            self.media_url(pv),
+            {"file": self.upload("image.png", b"image", "image/png")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(NormalMessage.objects.count(), 1)
+        self.assertEqual(File.objects.count(), 1)
+        self.assertEqual(NormalMessage.objects.get().file, File.objects.get())
+
+    def test_response_does_not_expose_private_storage_path(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.owner)
+
+        response = client.post(
+            self.media_url(pv),
+            {"file": self.upload("secret.txt", b"secret", "text/plain")},
+            format="multipart",
+        )
+        response_text = str(response.data)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertNotIn("storage_path", response.data["attachment"])
+        self.assertNotIn("attachments/chat_", response_text)
+        self.assertNotIn(str(settings.PRIVATE_MEDIA_ROOT), response_text)
+        self.assertNotIn(str(settings.MEDIA_ROOT), response_text)
+
+    def test_failed_request_leaves_no_message_file_or_private_upload(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.third_user)
+
+        response = client.post(
+            self.media_url(pv),
+            {"file": self.upload("blocked.txt", b"blocked", "text/plain")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assert_no_messages_files_or_private_uploads()
+
+    def upload(self, name, content, content_type):
+        return SimpleUploadedFile(name, content, content_type=content_type)
+
+    def private_path(self, stored_file):
+        return (Path(settings.PRIVATE_MEDIA_ROOT) / stored_file.storage_path).resolve()
+
+    def assert_private_file_exists(self, stored_file):
+        self.assertTrue(self.private_path(stored_file).exists())
+
+    def assert_no_messages_files_or_private_uploads(self):
+        self.assertEqual(Message.objects.count(), 0)
+        self.assertEqual(NormalMessage.objects.count(), 0)
+        self.assertEqual(File.objects.count(), 0)
+        if self.private_root.exists():
+            stored_paths = [path for path in self.private_root.rglob("*") if path.is_file()]
+            self.assertEqual(stored_paths, [])
+
+
 class MediaMessageCreationServiceTests(TestCase):
     def setUp(self):
         self.temp_dir = TemporaryDirectory()
