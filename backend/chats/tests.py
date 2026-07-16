@@ -14,6 +14,7 @@ from .models import (
     Topic,
 )
 from .permissions import can_access_chat, can_send_to_chat
+from .services import build_direct_chat_key, get_or_create_direct_chat
 
 
 class ChatPermissionTests(TestCase):
@@ -133,3 +134,83 @@ class PvDirectKeyTests(TestCase):
 
         self.assertIsNone(first.direct_key)
         self.assertIsNone(second.direct_key)
+
+
+class DirectChatServiceTests(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            phone_number="1000", password="password"
+        )
+        self.bob = User.objects.create_user(phone_number="2000", password="password")
+
+    def test_direct_key_uses_sorted_user_identifiers(self):
+        self.assertEqual(
+            build_direct_chat_key(self.bob, self.alice),
+            "direct:1000:2000",
+        )
+
+    def test_first_call_creates_pv(self):
+        pv, created = get_or_create_direct_chat(self.alice, self.bob)
+
+        self.assertTrue(created)
+        self.assertEqual(Pv.objects.count(), 1)
+        self.assertEqual(pv.direct_key, "direct:1000:2000")
+
+    def test_second_call_returns_existing_pv(self):
+        first_pv, first_created = get_or_create_direct_chat(self.alice, self.bob)
+        second_pv, second_created = get_or_create_direct_chat(self.alice, self.bob)
+
+        self.assertTrue(first_created)
+        self.assertFalse(second_created)
+        self.assertEqual(second_pv.pk, first_pv.pk)
+        self.assertEqual(Pv.objects.count(), 1)
+
+    def test_reversed_order_returns_same_pv(self):
+        first_pv, _ = get_or_create_direct_chat(self.alice, self.bob)
+        second_pv, created = get_or_create_direct_chat(self.bob, self.alice)
+
+        self.assertFalse(created)
+        self.assertEqual(second_pv.pk, first_pv.pk)
+        self.assertEqual(Pv.objects.count(), 1)
+
+    def test_both_users_receive_memberships(self):
+        pv, _ = get_or_create_direct_chat(self.alice, self.bob)
+
+        member_ids = list(
+            PvMembership.objects.filter(pv=pv)
+            .order_by("user_id")
+            .values_list("user_id", flat=True)
+        )
+        self.assertEqual(member_ids, ["1000", "2000"])
+
+    def test_repeated_calls_do_not_duplicate_memberships(self):
+        pv, _ = get_or_create_direct_chat(self.alice, self.bob)
+
+        get_or_create_direct_chat(self.alice, self.bob)
+        get_or_create_direct_chat(self.bob, self.alice)
+
+        self.assertEqual(PvMembership.objects.filter(pv=pv).count(), 2)
+
+    def test_existing_direct_chat_memberships_are_synchronized(self):
+        pv = Pv.objects.create(direct_key="direct:1000:2000")
+        third_user = User.objects.create_user(
+            phone_number="3000", password="password"
+        )
+        PvMembership.objects.create(pv=pv, user=third_user)
+
+        existing_pv, created = get_or_create_direct_chat(self.alice, self.bob)
+
+        member_ids = list(
+            PvMembership.objects.filter(pv=existing_pv)
+            .order_by("user_id")
+            .values_list("user_id", flat=True)
+        )
+        self.assertFalse(created)
+        self.assertEqual(existing_pv.pk, pv.pk)
+        self.assertEqual(member_ids, ["1000", "2000"])
+
+    def test_self_chat_is_rejected(self):
+        with self.assertRaisesMessage(
+            ValueError, "Cannot start a direct chat with yourself."
+        ):
+            get_or_create_direct_chat(self.alice, self.alice)
