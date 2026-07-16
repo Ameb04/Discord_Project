@@ -1,6 +1,8 @@
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
+from rest_framework.test import APIClient
 
+from accounts.authentication import APP_USER_SESSION_KEY
 from accounts.models import User
 from chats.models import (
     AccessLevel,
@@ -131,3 +133,187 @@ class TextMessageCreationServiceTests(TestCase):
     def assert_no_messages_created(self):
         self.assertEqual(Message.objects.count(), 0)
         self.assertEqual(NormalMessage.objects.count(), 0)
+
+
+class MessageListCreateApiTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            phone_number="1000", password="password"
+        )
+        self.member = User.objects.create_user(
+            phone_number="2000", password="password"
+        )
+        self.third_user = User.objects.create_user(
+            phone_number="3000", password="password"
+        )
+
+    def authenticated_client(self, user):
+        client = APIClient()
+        session = client.session
+        session[APP_USER_SESSION_KEY] = user.pk
+        session.save()
+        return client
+
+    def messages_url(self, chat):
+        return f"/api/chats/{chat.pk}/messages/"
+
+    def create_pv(self):
+        pv = Pv.objects.create(name="Direct chat")
+        PvMembership.objects.create(pv=pv, user=self.owner)
+        PvMembership.objects.create(pv=pv, user=self.member)
+        return pv
+
+    def create_group(self):
+        group = Group.objects.create(name="Group chat", owner=self.owner)
+        GroupMembership.objects.create(group=group, user=self.member)
+        return group
+
+    def test_authorized_pv_member_can_list_messages(self):
+        pv = self.create_pv()
+        create_text_message(self.owner, pv, "Private hello")
+        client = self.authenticated_client(self.member)
+
+        response = client.get(self.messages_url(pv))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["content"], "Private hello")
+        self.assertEqual(response.data[0]["attachment"], None)
+
+    def test_unauthorized_third_user_cannot_list_pv_messages(self):
+        pv = self.create_pv()
+        create_text_message(self.owner, pv, "Private secret")
+        client = self.authenticated_client(self.third_user)
+
+        response = client.get(self.messages_url(pv))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn("Private secret", str(response.data))
+
+    def test_authorized_group_owner_and_member_can_list_messages(self):
+        group = self.create_group()
+        create_text_message(self.owner, group, "Group hello")
+
+        owner_response = self.authenticated_client(self.owner).get(
+            self.messages_url(group)
+        )
+        member_response = self.authenticated_client(self.member).get(
+            self.messages_url(group)
+        )
+
+        self.assertEqual(owner_response.status_code, 200)
+        self.assertEqual(member_response.status_code, 200)
+        self.assertEqual(owner_response.data[0]["content"], "Group hello")
+        self.assertEqual(member_response.data[0]["content"], "Group hello")
+
+    def test_unauthorized_group_user_cannot_list_messages(self):
+        group = self.create_group()
+        create_text_message(self.owner, group, "Group secret")
+        client = self.authenticated_client(self.third_user)
+
+        response = client.get(self.messages_url(group))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn("Group secret", str(response.data))
+
+    def test_authorized_user_can_post_valid_text_message(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.owner)
+
+        response = client.post(
+            self.messages_url(pv), {"content": "Hello"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["chat"], pv.pk)
+        self.assertEqual(response.data["sender"]["phone_number"], self.owner.pk)
+        self.assertEqual(response.data["content"], "Hello")
+        self.assertIsNotNone(response.data["sent_at"])
+        self.assertEqual(response.data["attachment"], None)
+
+    def test_empty_content_is_rejected(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.owner)
+
+        response = client.post(self.messages_url(pv), {"content": ""}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(NormalMessage.objects.count(), 0)
+
+    def test_whitespace_only_content_is_rejected(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.owner)
+
+        response = client.post(
+            self.messages_url(pv), {"content": "   \n\t  "}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(NormalMessage.objects.count(), 0)
+
+    def test_unauthorized_sender_is_rejected(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.third_user)
+
+        response = client.post(
+            self.messages_url(pv), {"content": "Nope"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(NormalMessage.objects.count(), 0)
+
+    def test_nonexistent_chat_returns_404(self):
+        client = self.authenticated_client(self.owner)
+
+        get_response = client.get("/api/chats/9999/messages/")
+        post_response = client.post(
+            "/api/chats/9999/messages/", {"content": "Hello"}, format="json"
+        )
+
+        self.assertEqual(get_response.status_code, 404)
+        self.assertEqual(post_response.status_code, 404)
+
+    def test_unauthenticated_get_is_rejected(self):
+        pv = self.create_pv()
+
+        response = APIClient().get(self.messages_url(pv))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_unauthenticated_post_is_rejected(self):
+        pv = self.create_pv()
+
+        response = APIClient().post(
+            self.messages_url(pv), {"content": "Hello"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(NormalMessage.objects.count(), 0)
+
+    def test_sent_message_appears_in_subsequent_get(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.owner)
+
+        post_response = client.post(
+            self.messages_url(pv), {"content": "Fresh message"}, format="json"
+        )
+        get_response = client.get(self.messages_url(pv))
+
+        self.assertEqual(post_response.status_code, 201)
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(get_response.data[0]["id"], post_response.data["id"])
+        self.assertEqual(get_response.data[0]["content"], "Fresh message")
+
+    def test_messages_are_returned_in_chronological_order(self):
+        pv = self.create_pv()
+        create_text_message(self.owner, pv, "First")
+        create_text_message(self.member, pv, "Second")
+        client = self.authenticated_client(self.owner)
+
+        response = client.get(self.messages_url(pv))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [message["content"] for message in response.data],
+            ["First", "Second"],
+        )
