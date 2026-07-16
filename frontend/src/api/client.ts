@@ -12,4 +12,11 @@ const client = axios.create({
   xsrfHeaderName: "X-CSRFToken",
 });
 
+export function apiUrl(path: string): string {
+  const baseURL = client.defaults.baseURL;
+  if (!baseURL) return path;
+  if (!/^https?:\/\//i.test(baseURL)) return path;
+  return new URL(path, baseURL).toString();
+}
+
 export default client;
