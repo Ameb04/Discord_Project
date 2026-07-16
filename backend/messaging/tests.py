@@ -1,5 +1,11 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest import mock
+
+from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from accounts.authentication import APP_USER_SESSION_KEY
@@ -13,9 +19,10 @@ from chats.models import (
     PvMembership,
     Topic,
 )
+from core.models import File
 
 from .models import Message, NormalMessage
-from .services import create_text_message
+from .services import create_media_message, create_text_message
 
 
 class TextMessageCreationServiceTests(TestCase):
@@ -317,3 +324,222 @@ class MessageListCreateApiTests(TestCase):
             [message["content"] for message in response.data],
             ["First", "Second"],
         )
+
+
+class MediaMessageCreationServiceTests(TestCase):
+    def setUp(self):
+        self.temp_dir = TemporaryDirectory()
+        self.private_root = Path(self.temp_dir.name) / "private"
+        self.public_root = Path(self.temp_dir.name) / "media"
+        self.settings_override = override_settings(
+            PRIVATE_MEDIA_ROOT=self.private_root,
+            MEDIA_ROOT=self.public_root,
+        )
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
+        self.addCleanup(self.temp_dir.cleanup)
+
+        self.owner = User.objects.create_user(
+            phone_number="1000", password="password"
+        )
+        self.member = User.objects.create_user(
+            phone_number="2000", password="password"
+        )
+        self.third_user = User.objects.create_user(
+            phone_number="3000", password="password"
+        )
+
+    def test_authorized_pv_member_can_create_media_message(self):
+        pv = self.create_authorized_pv()
+
+        message = create_media_message(
+            self.owner,
+            pv,
+            self.upload("report.pdf", b"private pdf", "application/pdf"),
+            content="  See attached  ",
+        )
+
+        self.assertIsInstance(message, NormalMessage)
+        self.assertEqual(message.sender, self.owner)
+        self.assertEqual(message.chat, pv)
+        self.assertEqual(message.content, "See attached")
+        self.assertIsNotNone(message.sent_at)
+        self.assertIsNotNone(message.file)
+        self.assert_private_file_exists(message.file)
+
+    def test_unauthorized_pv_user_cannot_upload(self):
+        pv = Pv.objects.create(name="Direct chat")
+        PvMembership.objects.create(pv=pv, user=self.owner)
+
+        with self.assertRaises(PermissionDenied):
+            create_media_message(
+                self.third_user,
+                pv,
+                self.upload("secret.txt", b"secret", "text/plain"),
+            )
+
+        self.assert_no_messages_files_or_private_uploads()
+
+    def test_authorized_group_owner_and_member_can_upload(self):
+        group = Group.objects.create(name="Group chat", owner=self.owner)
+        GroupMembership.objects.create(group=group, user=self.member)
+
+        owner_message = create_media_message(
+            self.owner, group, self.upload("owner.txt", b"owner", "text/plain")
+        )
+        member_message = create_media_message(
+            self.member, group, self.upload("member.txt", b"member", "text/plain")
+        )
+
+        self.assertEqual(owner_message.sender, self.owner)
+        self.assertEqual(member_message.sender, self.member)
+        self.assertEqual(NormalMessage.objects.count(), 2)
+        self.assertEqual(File.objects.count(), 2)
+
+    def test_unauthorized_group_user_cannot_upload(self):
+        group = Group.objects.create(name="Group chat", owner=self.owner)
+
+        with self.assertRaises(PermissionDenied):
+            create_media_message(
+                self.third_user,
+                group,
+                self.upload("nope.txt", b"nope", "text/plain"),
+            )
+
+        self.assert_no_messages_files_or_private_uploads()
+
+    def test_authorized_topic_user_can_upload(self):
+        channel = Channel.objects.create(name="Public channel", owner=self.owner)
+        topic = Topic.objects.create(
+            name="Public topic",
+            channel=channel,
+            access_level=AccessLevel.PUBLIC,
+        )
+
+        message = create_media_message(
+            self.third_user,
+            topic,
+            self.upload("topic.txt", b"topic", "text/plain"),
+        )
+
+        self.assertEqual(message.chat, topic)
+        self.assertEqual(message.sender, self.third_user)
+        self.assert_private_file_exists(message.file)
+
+    def test_missing_file_is_rejected(self):
+        pv = self.create_authorized_pv()
+
+        with self.assertRaises(ValidationError):
+            create_media_message(self.owner, pv, None)
+
+        self.assert_no_messages_files_or_private_uploads()
+
+    def test_empty_file_is_rejected(self):
+        pv = self.create_authorized_pv()
+
+        with self.assertRaises(ValidationError):
+            create_media_message(
+                self.owner,
+                pv,
+                self.upload("empty.txt", b"", "text/plain"),
+            )
+
+        self.assert_no_messages_files_or_private_uploads()
+
+    def test_file_is_stored_under_private_media_root_not_public_media_root(self):
+        pv = self.create_authorized_pv()
+
+        message = create_media_message(
+            self.owner,
+            pv,
+            self.upload("photo.png", b"png bytes", "image/png"),
+        )
+
+        private_path = self.private_path(message.file)
+        public_root = Path(settings.MEDIA_ROOT).resolve()
+        self.assertTrue(private_path.exists())
+        self.assertIn(Path(settings.PRIVATE_MEDIA_ROOT).resolve(), private_path.parents)
+        self.assertNotEqual(public_root, private_path)
+        self.assertNotIn(public_root, private_path.parents)
+
+    def test_core_file_stores_private_metadata(self):
+        pv = self.create_authorized_pv()
+
+        message = create_media_message(
+            self.owner,
+            pv,
+            self.upload("folder\\unsafe name.txt", b"hello", "text/plain"),
+        )
+        stored_file = message.file
+
+        self.assertEqual(stored_file.name, "unsafe_name.txt")
+        self.assertEqual(stored_file.type, "text/plain")
+        self.assertEqual(stored_file.size, 5)
+        self.assertTrue(stored_file.storage_path.startswith(f"attachments/chat_{pv.pk}/"))
+        self.assertEqual(stored_file.link, "")
+
+    def test_created_message_references_the_correct_file(self):
+        pv = self.create_authorized_pv()
+
+        message = create_media_message(
+            self.owner,
+            pv,
+            self.upload("notes.txt", b"notes", "text/plain"),
+        )
+
+        self.assertEqual(message.file, File.objects.get(pk=message.file_id))
+
+    def test_failed_database_creation_removes_orphaned_private_file(self):
+        pv = self.create_authorized_pv()
+
+        with mock.patch(
+            "messaging.services.File.objects.create",
+            side_effect=RuntimeError("database failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                create_media_message(
+                    self.owner,
+                    pv,
+                    self.upload("orphan.txt", b"orphan", "text/plain"),
+                )
+
+        self.assert_no_messages_files_or_private_uploads()
+
+    def test_repeated_filenames_do_not_overwrite_each_other(self):
+        pv = self.create_authorized_pv()
+
+        first = create_media_message(
+            self.owner, pv, self.upload("same.txt", b"first", "text/plain")
+        )
+        second = create_media_message(
+            self.owner, pv, self.upload("same.txt", b"second", "text/plain")
+        )
+
+        self.assertEqual(first.file.name, "same.txt")
+        self.assertEqual(second.file.name, "same.txt")
+        self.assertNotEqual(first.file.storage_path, second.file.storage_path)
+        self.assertEqual(self.private_path(first.file).read_bytes(), b"first")
+        self.assertEqual(self.private_path(second.file).read_bytes(), b"second")
+
+    def upload(self, name, content, content_type):
+        return SimpleUploadedFile(name, content, content_type=content_type)
+
+    def create_authorized_pv(self):
+        pv = Pv.objects.create(name="Direct chat")
+        PvMembership.objects.create(pv=pv, user=self.owner)
+        PvMembership.objects.create(pv=pv, user=self.member)
+        return pv
+
+    def private_path(self, stored_file):
+        return (Path(settings.PRIVATE_MEDIA_ROOT) / stored_file.storage_path).resolve()
+
+    def assert_private_file_exists(self, stored_file):
+        self.assertTrue(self.private_path(stored_file).exists())
+
+    def assert_no_messages_files_or_private_uploads(self):
+        self.assertEqual(Message.objects.count(), 0)
+        self.assertEqual(NormalMessage.objects.count(), 0)
+        self.assertEqual(File.objects.count(), 0)
+        if self.private_root.exists():
+            stored_paths = [path for path in self.private_root.rglob("*") if path.is_file()]
+            self.assertEqual(stored_paths, [])
