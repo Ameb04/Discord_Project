@@ -1,3 +1,4 @@
+import { MessagesSquare } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getConversationIndex } from "../api/chats";
@@ -93,7 +94,7 @@ function HomePage() {
       : undefined;
 
   return (
-    <div className="h-full min-h-0 bg-[#090909] text-white">
+    <div className="h-full min-h-0">
       <div className="mx-auto h-full w-full max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
         <div className="grid h-full min-h-0 gap-4 lg:grid-cols-[19rem_minmax(0,1fr)]">
           <ConversationSidebar
@@ -109,15 +110,15 @@ function HomePage() {
           <main className="h-full min-h-0 overflow-hidden">
             {hasRouteChatId ? (
               parsedChatId === null ? (
-                <div className="flex h-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-2xl shadow-black/30">
+                <div className="flex h-full items-center justify-center rounded-2xl border border-border bg-card/50 p-6 shadow-2xl shadow-black/30 backdrop-blur-sm">
                   <div className="max-w-xl text-center">
-                    <p className="text-xs uppercase tracking-[0.3em] text-white/40">
+                    <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/80">
                       Invalid conversation
                     </p>
-                    <h1 className="mt-3 text-3xl font-semibold text-white">
+                    <h1 className="mt-3 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
                       This conversation link is not valid.
                     </h1>
-                    <p className="mt-3 text-sm leading-7 text-white/60">
+                    <p className="mt-3 text-sm leading-7 text-muted-foreground">
                       The selected chat could not be opened. Go back to your inbox and choose a valid conversation.
                     </p>
 
@@ -139,15 +140,17 @@ function HomePage() {
                 />
               )
             ) : (
-              <div className="flex h-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-2xl shadow-black/30">
+              <div className="flex h-full items-center justify-center rounded-2xl border border-border bg-card/50 p-6 shadow-2xl shadow-black/30 backdrop-blur-sm">
                 <div className="max-w-2xl text-center">
-                  <p className="text-xs uppercase tracking-[0.3em] text-white/40">Home</p>
-                  <h1 className="mt-3 text-3xl font-semibold text-white">
-                    Pick a private chat or group
+                  <span className="bg-brand-gradient mx-auto grid size-16 place-items-center rounded-3xl text-white shadow-glow">
+                    <MessagesSquare className="size-8" aria-hidden="true" />
+                  </span>
+                  <h1 className="mt-6 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+                    Pick a conversation to start
                   </h1>
-                  <p className="mt-3 text-sm leading-7 text-white/60">
-                    Use the sidebar on the left to switch between direct messages and groups.
-                    You can also search for users from the top bar and open a new chat.
+                  <p className="mt-3 text-sm leading-7 text-muted-foreground">
+                    Use the sidebar to switch between direct messages and groups. You can
+                    also search for people from the top bar and open a new chat.
                   </p>
 
                   <div className="mt-6 flex flex-wrap justify-center gap-3">
@@ -160,9 +163,9 @@ function HomePage() {
                   </div>
 
                   {isLoading ? (
-                    <div className="mt-8 grid gap-3 text-left">
+                    <div className="mx-auto mt-8 grid max-w-xs gap-3 text-left">
                       <Skeleton className="h-4 w-40" />
-                      <Skeleton className="h-4 w-72" />
+                      <Skeleton className="h-4 w-full" />
                       <Skeleton className="h-4 w-56" />
                     </div>
                   ) : null}

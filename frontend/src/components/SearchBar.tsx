@@ -1,4 +1,8 @@
+import { Search } from "lucide-react";
 import type { FormEvent } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type SearchBarProps = {
   value: string;
@@ -15,27 +19,29 @@ function SearchBar({ value, disabled = false, onChange, onSubmit }: SearchBarPro
 
   return (
     <form className="grid gap-3" onSubmit={handleSubmit}>
-      <label className="text-sm font-medium text-white/80" htmlFor="user-search">
-        Name or phone number
-      </label>
+      <Label htmlFor="user-search">Name or phone number</Label>
       <div className="flex flex-col gap-3 sm:flex-row">
-        <input
-          id="user-search"
-          type="search"
-          value={value}
-          placeholder="Search by name or phone number"
-          disabled={disabled}
-          autoComplete="off"
-          className="h-12 min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 text-white outline-none transition placeholder:text-white/30 focus:border-white/30 focus:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-60"
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <button
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="user-search"
+            type="search"
+            value={value}
+            placeholder="Search by name or phone number"
+            disabled={disabled}
+            autoComplete="off"
+            className="h-12 pl-10"
+            onChange={(event) => onChange(event.target.value)}
+          />
+        </div>
+        <Button
           type="submit"
+          size="lg"
           disabled={disabled || !value.trim()}
-          className="inline-flex h-12 items-center justify-center rounded-2xl bg-white px-6 text-sm font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+          className="sm:w-32"
         >
           {disabled ? "Searching..." : "Search"}
-        </button>
+        </Button>
       </div>
     </form>
   );

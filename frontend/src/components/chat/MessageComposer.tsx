@@ -104,16 +104,16 @@ function MessageComposer({ chatId, disabled = false, onMessageSent }: MessageCom
 
   return (
     <form
-      className="border-t border-white/10 bg-black/15 px-5 py-4 sm:px-6"
+      className="border-t border-border bg-black/20 px-5 py-4 sm:px-6"
       onSubmit={handleSubmit}
     >
       {selectedFile ? (
-        <div className="mb-3 flex max-w-full items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/75">
+        <div className="mb-3 flex max-w-full items-center justify-between gap-3 rounded-2xl border border-border bg-white/[0.04] px-3 py-2 text-sm text-foreground/80">
           <div className="flex min-w-0 items-center gap-3">
-            <FileText className="size-4 shrink-0 text-white/50" aria-hidden="true" />
+            <FileText className="size-4 shrink-0 text-primary" aria-hidden="true" />
             <span className="min-w-0">
-              <span className="block truncate font-medium text-white">{selectedFile.name}</span>
-              <span className="mt-0.5 block text-xs text-white/45">
+              <span className="block truncate font-medium text-foreground">{selectedFile.name}</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
                 {formatFileSize(selectedFile.size)}
               </span>
             </span>
@@ -174,7 +174,7 @@ function MessageComposer({ chatId, disabled = false, onMessageSent }: MessageCom
       </div>
 
       {isSending ? (
-        <p className="mt-3 text-sm text-white/45">{statusText}</p>
+        <p className="mt-3 text-sm text-muted-foreground">{statusText}</p>
       ) : null}
 
       {error ? (

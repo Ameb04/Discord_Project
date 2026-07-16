@@ -1,8 +1,32 @@
+import { AlertCircle, SearchX, Users } from "lucide-react";
 import { useState } from "react";
 import { searchUsers } from "../api/users";
 import SearchBar from "../components/SearchBar";
 import UserCard from "../components/UserCard";
+import { PageHeader } from "../components/PageHeader";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { PublicUser } from "../types/user";
+
+function EmptyState({
+  icon,
+  title,
+  hint,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-white/[0.02] px-6 py-12 text-center">
+      <span className="mb-3 grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
+        {icon}
+      </span>
+      <p className="font-medium text-foreground">{title}</p>
+      <p className="mt-1 max-w-sm text-sm text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
 
 function SearchResultsPage() {
   const [query, setQuery] = useState("");
@@ -38,25 +62,21 @@ function SearchResultsPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-6 py-10 sm:px-8 lg:py-14">
-      <div className="max-w-2xl">
-        <p className="text-xs uppercase text-white/45">People</p>
-        <h1 className="mt-3 text-3xl font-semibold text-white">
-          Find people
-        </h1>
-        <p className="mt-3 text-sm leading-7 text-white/60">
-          Search for another user by their name or phone number.
-        </p>
-      </div>
+    <main className="mx-auto w-full max-w-4xl px-4 py-10 sm:px-6 lg:py-14">
+      <PageHeader
+        eyebrow="People"
+        title="Find people"
+        description="Search for another user by their name or phone number, then start a direct chat."
+      />
 
-      <section className="mt-8 rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/30 sm:p-6">
+      <Card className="mt-8 p-5 sm:p-6">
         <SearchBar
           value={query}
           disabled={isLoading}
           onChange={setQuery}
           onSubmit={handleSearch}
         />
-      </section>
+      </Card>
 
       <section
         className="mt-8"
@@ -65,40 +85,54 @@ function SearchResultsPage() {
         aria-label="Search results"
       >
         {isLoading && (
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-6 text-sm text-white/60">
-            Searching for people...
+          <div className="grid gap-3" aria-label="Loading results">
+            {[0, 1, 2].map((key) => (
+              <div
+                key={key}
+                className="flex items-center gap-4 rounded-2xl border border-border bg-card/40 p-4"
+              >
+                <Skeleton className="size-12 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-28" />
+                </div>
+                <Skeleton className="h-9 w-24 rounded-lg" />
+              </div>
+            ))}
           </div>
         )}
 
         {!isLoading && error && (
           <div
             role="alert"
-            className="rounded-2xl border border-red-400/20 bg-red-400/[0.06] px-5 py-4 text-sm text-red-100/80"
+            className="flex items-center gap-2.5 rounded-2xl border border-destructive/25 bg-destructive/10 px-5 py-4 text-sm text-red-100"
           >
+            <AlertCircle className="size-4 shrink-0" />
             {error}
           </div>
         )}
 
         {!isLoading && !error && !hasSearched && (
-          <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-5 py-8 text-center text-sm text-white/45">
-            Search results will appear here.
-          </div>
+          <EmptyState
+            icon={<Users className="size-6" />}
+            title="Search for people"
+            hint="Results will appear here once you search by name or phone number."
+          />
         )}
 
         {!isLoading && !error && hasSearched && users.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-5 py-8 text-center">
-            <p className="font-medium text-white/80">No people found</p>
-            <p className="mt-2 text-sm text-white/45">
-              Try a different name or phone number.
-            </p>
-          </div>
+          <EmptyState
+            icon={<SearchX className="size-6" />}
+            title="No people found"
+            hint="Try a different name or phone number."
+          />
         )}
 
         {!isLoading && !error && users.length > 0 && (
           <>
             <div className="mb-4 flex items-center justify-between gap-4">
-              <h2 className="text-sm font-semibold text-white">Search results</h2>
-              <span className="text-xs text-white/40">
+              <h2 className="text-sm font-semibold text-foreground">Search results</h2>
+              <span className="text-xs text-muted-foreground">
                 {users.length} {users.length === 1 ? "person" : "people"}
               </span>
             </div>

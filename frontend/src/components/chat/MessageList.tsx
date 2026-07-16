@@ -38,16 +38,16 @@ function MessageList({ messages, currentUser }: MessageListProps) {
             className={`flex ${isOwnMessage ? "justify-end" : "justify-start"}`}
           >
             <article
-              className={`max-w-[min(34rem,100%)] rounded-2xl border px-4 py-3 shadow-lg shadow-black/20 ${
+              className={`max-w-[min(34rem,100%)] rounded-2xl border px-4 py-3 shadow-lg ${
                 isOwnMessage
-                  ? "border-white/20 bg-white text-black"
-                  : "border-white/10 bg-white/[0.04] text-white"
+                  ? "bg-brand-gradient border-transparent text-white shadow-primary/25 rounded-tr-sm"
+                  : "border-border bg-white/[0.04] text-foreground shadow-black/20 rounded-tl-sm"
               }`}
             >
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <p
                   className={`text-sm font-semibold ${
-                    isOwnMessage ? "text-black" : "text-white"
+                    isOwnMessage ? "text-white" : "text-foreground"
                   }`}
                 >
                   {isOwnMessage ? "You" : displayName(message)}
@@ -55,7 +55,7 @@ function MessageList({ messages, currentUser }: MessageListProps) {
                 <time
                   dateTime={message.sent_at}
                   className={`text-xs ${
-                    isOwnMessage ? "text-black/50" : "text-white/40"
+                    isOwnMessage ? "text-white/70" : "text-muted-foreground"
                   }`}
                 >
                   {formatSentAt(message.sent_at)}
@@ -65,7 +65,7 @@ function MessageList({ messages, currentUser }: MessageListProps) {
               {message.content ? (
                 <p
                   className={`mt-2 whitespace-pre-wrap break-words text-sm leading-6 ${
-                    isOwnMessage ? "text-black/85" : "text-white/75"
+                    isOwnMessage ? "text-white/95" : "text-foreground/80"
                   }`}
                 >
                   {message.content}
@@ -73,9 +73,7 @@ function MessageList({ messages, currentUser }: MessageListProps) {
               ) : null}
 
               {message.attachment ? (
-                <div className={isOwnMessage ? "[&_a]:border-black/10 [&_a]:bg-black/[0.04] [&_a]:text-black/75 [&_a:hover]:bg-black/[0.08] [&_svg]:text-black/45 [&_span_span:first-child]:text-black [&_span_span:last-child]:text-black/45" : ""}>
-                  <AttachmentLink attachment={message.attachment} />
-                </div>
+                <AttachmentLink attachment={message.attachment} />
               ) : null}
             </article>
           </li>

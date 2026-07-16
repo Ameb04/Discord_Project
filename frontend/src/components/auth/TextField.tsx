@@ -1,23 +1,31 @@
-import type { InputHTMLAttributes } from "react";
+import { useId, type InputHTMLAttributes, type ReactNode } from "react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface TextFieldProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string;
   helperText?: string;
+  icon?: ReactNode;
 }
 
-export function TextField({ label, helperText, className = "", ...props }: TextFieldProps) {
+export function TextField({ label, helperText, icon, className, id, ...props }: TextFieldProps) {
+  const generatedId = useId();
+  const fieldId = id ?? generatedId;
+
   return (
-    <label className="grid gap-2">
-      <span className="text-sm font-medium text-white/80">{label}</span>
-      <input
-        {...props}
-        className={[
-          "h-12 rounded-2xl border border-white/10 bg-white/5 px-4 text-white outline-none transition",
-          "placeholder:text-white/30 focus:border-white/30 focus:bg-white/[0.07]",
-          className,
-        ].join(" ")}
-      />
-      {helperText ? <span className="text-xs text-white/40">{helperText}</span> : null}
-    </label>
+    <div className="grid gap-2">
+      <Label htmlFor={fieldId}>{label}</Label>
+      <div className="relative">
+        {icon ? (
+          <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground">
+            {icon}
+          </span>
+        ) : null}
+        <Input id={fieldId} className={icon ? `pl-10 ${className ?? ""}` : className} {...props} />
+      </div>
+      {helperText ? (
+        <span className="text-xs text-muted-foreground/80">{helperText}</span>
+      ) : null}
+    </div>
   );
 }

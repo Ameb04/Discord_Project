@@ -1,3 +1,13 @@
+import { useId } from "react";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 interface GenderSelectProps {
   value: "male" | "female";
   onChange: (value: "male" | "female") => void;
@@ -5,21 +15,20 @@ interface GenderSelectProps {
 }
 
 export function GenderSelect({ value, onChange, label }: GenderSelectProps) {
+  const fieldId = useId();
+
   return (
-    <label className="grid gap-2">
-      <span className="text-sm font-medium text-white/80">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value as "male" | "female")}
-        className="h-12 rounded-2xl border border-white/10 bg-white/5 px-4 text-white outline-none transition focus:border-white/30 focus:bg-white/[0.07]"
-      >
-        <option value="male" className="text-black">
-          Male
-        </option>
-        <option value="female" className="text-black">
-          Female
-        </option>
-      </select>
-    </label>
+    <div className="grid gap-2">
+      <Label htmlFor={fieldId}>{label}</Label>
+      <Select value={value} onValueChange={(next) => onChange(next as "male" | "female")}>
+        <SelectTrigger id={fieldId} className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="male">Male</SelectItem>
+          <SelectItem value="female">Female</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
   );
 }

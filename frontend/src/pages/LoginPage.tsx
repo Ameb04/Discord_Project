@@ -1,10 +1,13 @@
 import { useState, type FormEvent } from "react";
+import { KeyRound, LogIn } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { AuthShell } from "../components/auth/AuthShell";
 import { AuthCard } from "../components/auth/AuthCard";
 import { CountryPhoneField } from "../components/auth/CountryPhoneField";
 import { TextField } from "../components/auth/TextField";
+import { FormError } from "../components/auth/FormError";
+import { Button } from "@/components/ui/button";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -40,23 +43,22 @@ export function LoginPage() {
 
   return (
     <AuthShell
-      visualTitle="Welcome back."
-      visualText="Log in with your phone number and continue in a clean, minimal interface."
+      visualTitle="Pick up right where you left off."
+      visualText="Sign in to keep the conversation going — fast, secure, and beautifully minimal."
       visualBullets={[
-        "Black and silver layout with a quiet look",
-        "Fast sign-in flow for mobile-first accounts",
-        "Everything stays simple and focused",
+        "Instant, real-time direct messaging",
+        "Share files and media in a tap",
+        "A calm, focused, distraction-free space",
       ]}
     >
-      <AuthCard title="Login" description="Enter your phone number and password to continue.">
-        <form onSubmit={submit} className="grid gap-5">
+      <AuthCard title="Welcome back" description="Enter your phone number and password to continue.">
+        <form onSubmit={submit} className="grid gap-4">
           <CountryPhoneField
             label="Phone number"
             countryCode={countryCode}
             phoneNumber={phoneNumber}
             onCountryCodeChange={setCountryCode}
             onPhoneNumberChange={setPhoneNumber}
-            helperText="Choose your country code, then type the rest of the phone number."
           />
 
           <TextField
@@ -64,28 +66,22 @@ export function LoginPage() {
             type="password"
             autoComplete="current-password"
             placeholder="Enter your password"
+            icon={<KeyRound className="size-4" />}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
 
-          {(localError || error) ? (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white/70">
-              {localError || error}
-            </div>
-          ) : null}
+          <FormError message={localError || error} />
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="inline-flex h-12 items-center justify-center rounded-2xl bg-white px-5 text-sm font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-70"
-          >
+          <Button type="submit" size="lg" disabled={submitting} className="mt-1 w-full">
+            <LogIn className="size-4" aria-hidden="true" />
             {submitting ? "Logging in..." : "Login"}
-          </button>
+          </Button>
         </form>
 
-        <div className="pt-1 text-sm text-white/55">
-          Dont have account?{" "}
-          <Link to="/signup" className="font-semibold text-white underline decoration-white/30 underline-offset-4">
+        <div className="mt-6 text-center text-sm text-muted-foreground">
+          Don&apos;t have an account?{" "}
+          <Link to="/signup" className="font-semibold text-primary hover:underline underline-offset-4">
             Sign up
           </Link>
         </div>

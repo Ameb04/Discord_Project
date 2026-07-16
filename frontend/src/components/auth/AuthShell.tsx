@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { Check } from "lucide-react";
+import { Link } from "react-router-dom";
 import { BrandMark } from "../BrandMark";
 
 interface AuthShellProps {
@@ -15,50 +17,60 @@ export function AuthShell({
   visualBullets,
 }: AuthShellProps) {
   return (
-    <div className="min-h-screen bg-[#090909] text-white">
-      <div className="mx-auto grid min-h-screen w-full max-w-7xl lg:grid-cols-[1.2fr_0.8fr]">
-        <section className="relative flex min-h-screen flex-col px-6 py-6 sm:px-8 lg:px-12">
-          <div className="absolute left-6 top-6 sm:left-8 sm:top-8">
+    <div className="grid h-dvh grid-cols-1 overflow-hidden lg:grid-cols-2">
+      {/* Form column */}
+      <section className="flex h-full min-h-0 flex-col overflow-y-auto px-6 py-6 sm:px-10">
+        <header className="flex items-center justify-between">
+          <Link to="/" aria-label="Go to home">
             <BrandMark />
+          </Link>
+        </header>
+
+        <div className="flex min-h-0 flex-1 items-center justify-center py-6">
+          <div className="w-full max-w-md">{children}</div>
+        </div>
+      </section>
+
+      {/* Decorative brand column */}
+      <aside className="relative hidden overflow-hidden border-l border-border lg:block">
+        <div className="bg-brand-gradient absolute inset-0 opacity-[0.14]" aria-hidden="true" />
+        <div
+          className="absolute -right-24 top-1/4 size-96 rounded-full bg-primary/25 blur-3xl"
+          aria-hidden="true"
+        />
+        <div
+          className="absolute -left-16 bottom-0 size-80 rounded-full bg-sky-500/15 blur-3xl"
+          aria-hidden="true"
+        />
+
+        <div className="relative flex h-full flex-col justify-center px-14">
+          <div className="max-w-md">
+            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-white/[0.04] px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur-sm">
+              <span className="size-1.5 rounded-full bg-primary" />
+              Real-time messaging
+            </span>
+
+            <h2 className="mt-6 text-4xl font-semibold leading-tight tracking-tight text-foreground">
+              {visualTitle}
+            </h2>
+            <p className="mt-4 text-base leading-7 text-muted-foreground">{visualText}</p>
+
+            <ul className="mt-9 space-y-3">
+              {visualBullets.map((item) => (
+                <li
+                  key={item}
+                  className="flex items-center gap-3 rounded-2xl border border-border bg-white/[0.03] px-4 py-3 text-sm text-foreground/85 backdrop-blur-sm"
+                >
+                  <span className="bg-brand-gradient grid size-6 shrink-0 place-items-center rounded-lg">
+                    <Check className="size-3.5 text-white" />
+                  </span>
+                  {item}
+                </li>
+              ))}
+            </ul>
           </div>
-
-          <div className="flex flex-1 items-center justify-center pt-20 lg:pt-0">
-            <div className="w-full max-w-md">{children}</div>
-          </div>
-        </section>
-
-        <aside className="hidden border-l border-white/10 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.12),_transparent_42%),linear-gradient(180deg,#151515_0%,#090909_100%)] lg:block">
-          <div className="flex h-full items-center justify-center p-10">
-            <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-white/[0.03] p-6 shadow-2xl shadow-black/40 backdrop-blur-sm">
-              <div className="mb-6 rounded-[1.6rem] border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.16),rgba(255,255,255,0.03))] p-6">
-                <div className="flex h-[22rem] items-center justify-center rounded-[1.25rem] border border-white/10 bg-black/25">
-                  <div className="relative h-40 w-40">
-                    <div className="absolute inset-0 rounded-full border border-white/15" />
-                    <div className="absolute left-3 top-10 h-16 w-16 rounded-full bg-white/90 opacity-90" />
-                    <div className="absolute right-0 top-8 h-24 w-24 rounded-full border border-white/20 bg-white/5" />
-                    <div className="absolute bottom-4 left-11 h-10 w-24 rounded-full bg-white/75 opacity-85" />
-                    <div className="absolute bottom-10 right-2 h-6 w-6 rounded-full bg-white/70" />
-                  </div>
-                </div>
-              </div>
-
-              <h2 className="text-2xl font-semibold tracking-tight text-white">{visualTitle}</h2>
-              <p className="mt-3 text-sm leading-7 text-white/60">{visualText}</p>
-
-              <div className="mt-8 space-y-3">
-                {visualBullets.map((item) => (
-                  <div
-                    key={item}
-                    className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/80"
-                  >
-                    {item}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </aside>
-      </div>
+        </div>
+      </aside>
     </div>
   );
 }

@@ -80,16 +80,20 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] shadow-2xl shadow-black/30">
-      <header className="flex items-center gap-4 border-b border-white/10 px-5 py-4 sm:px-6">
-        <div className="grid size-11 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white/[0.06]">
-          <MessageCircle className="size-5 text-white/65" aria-hidden="true" />
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card/50 shadow-2xl shadow-black/30 backdrop-blur-sm">
+      <header className="flex items-center gap-4 border-b border-border px-5 py-4 sm:px-6">
+        <div className="bg-brand-gradient grid size-11 shrink-0 place-items-center rounded-2xl text-white shadow-lg shadow-primary/25">
+          <MessageCircle className="size-5" aria-hidden="true" />
         </div>
 
         <div className="min-w-0">
-          <h1 className="truncate text-lg font-semibold text-white">{title ?? fallbackTitle}</h1>
-          {subtitle ? <p className="mt-1 text-sm text-white/55">{subtitle}</p> : null}
-          <p className="mt-1 text-xs text-white/40">
+          <h1 className="truncate text-lg font-semibold text-foreground">
+            {title ?? fallbackTitle}
+          </h1>
+          {subtitle ? (
+            <p className="mt-0.5 truncate text-sm text-muted-foreground">{subtitle}</p>
+          ) : null}
+          <p className="mt-0.5 text-xs text-muted-foreground/70">
             {isLoading
               ? "Loading messages..."
               : `${messages.length} ${messages.length === 1 ? "message" : "messages"}`}
@@ -97,7 +101,7 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 sm:px-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
         {isLoading ? (
           <div className="grid gap-4" aria-label="Loading messages">
             <Skeleton className="h-20 w-3/4" />
@@ -109,17 +113,20 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
         {!isLoading && error ? (
           <div
             role="alert"
-            className="rounded-2xl border border-red-400/20 bg-red-400/[0.06] px-5 py-4 text-sm text-red-100/80"
+            className="rounded-2xl border border-destructive/25 bg-destructive/10 px-5 py-4 text-sm text-red-100"
           >
             {error}
           </div>
         ) : null}
 
         {!isLoading && !error && messages.length === 0 ? (
-          <div className="grid min-h-80 place-items-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 text-center">
+          <div className="grid min-h-80 place-items-center rounded-2xl border border-dashed border-border bg-white/[0.02] px-6 text-center">
             <div>
-              <p className="font-medium text-white/80">No messages yet</p>
-              <p className="mt-2 max-w-sm text-sm leading-6 text-white/45">
+              <span className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
+                <MessageCircle className="size-6" aria-hidden="true" />
+              </span>
+              <p className="font-medium text-foreground">No messages yet</p>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
                 Messages for this conversation will appear here once the chat starts.
               </p>
             </div>
@@ -131,7 +138,7 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
         ) : null}
       </div>
 
-      {error || chatId === null ? null : (
+      {error ? null : (
         <MessageComposer
           chatId={chatId}
           disabled={isLoading || Boolean(error)}

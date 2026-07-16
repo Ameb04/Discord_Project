@@ -1,18 +1,31 @@
+import { MessagesSquare } from "lucide-react";
+import { cn } from "@/lib/utils";
+
 const APP_NAME = "Discord Project";
 
-export function BrandMark() {
-  return (
-    <div className="flex items-center gap-3 select-none">
-      <div className="relative h-11 w-11 rounded-2xl border border-white/15 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
-        <div className="absolute inset-2 rounded-xl bg-gradient-to-br from-white to-zinc-500" />
-        <div className="absolute left-2.5 top-2.5 h-3.5 w-3.5 rounded-full border border-black/40 bg-black/90" />
-        <div className="absolute bottom-2.5 right-2.5 h-2 w-2 rounded-full bg-white/80" />
-      </div>
+interface BrandMarkProps {
+  className?: string;
+  /** Hide the wordmark and show only the glyph. */
+  compact?: boolean;
+}
 
-      <div className="leading-tight">
-        <p className="text-[11px] uppercase tracking-[0.32em] text-white/45">Silver UI</p>
-        <p className="text-lg font-semibold tracking-tight text-white">{APP_NAME}</p>
-      </div>
+export function BrandMark({ className, compact = false }: BrandMarkProps) {
+  return (
+    <div className={cn("flex select-none items-center gap-3", className)}>
+      <span className="bg-brand-gradient relative grid size-10 place-items-center rounded-2xl shadow-glow">
+        <MessagesSquare className="size-5 text-white" aria-hidden="true" />
+      </span>
+
+      {!compact ? (
+        <span className="leading-tight">
+          <span className="block text-[10px] font-medium uppercase tracking-[0.34em] text-muted-foreground">
+            Chat • Connect
+          </span>
+          <span className="block text-lg font-semibold tracking-tight text-foreground">
+            {APP_NAME}
+          </span>
+        </span>
+      ) : null}
     </div>
   );
 }

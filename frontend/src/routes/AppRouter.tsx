@@ -1,6 +1,7 @@
+import { Loader2 } from "lucide-react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
-import Navbar from "../components/Navbar";
 import { useAuth } from "../context/AuthContext";
+import Navbar from "../components/Navbar";
 import SearchResultsPage from "../pages/SearchResultsPage";
 import SettingsPage from "../pages/SettingsPage";
 import HomePage from "../pages/HomePage";
@@ -11,8 +12,9 @@ import ProfilePage from "../pages/ProfilePage";
 
 function LoadingScreen() {
   return (
-    <div className="grid min-h-screen place-items-center bg-[#090909] text-white">
-      <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white/70">
+    <div className="grid min-h-dvh place-items-center">
+      <div className="flex items-center gap-3 rounded-2xl border border-border bg-card/60 px-5 py-4 text-sm text-muted-foreground shadow-2xl shadow-black/30 backdrop-blur-sm">
+        <Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" />
         Loading...
       </div>
     </div>
@@ -46,9 +48,9 @@ function ProtectedRoute() {
 
 function AppLayout() {
   return (
-    <div className="flex min-h-screen flex-col bg-[#090909] text-white">
+    <div className="flex min-h-dvh flex-col">
       <Navbar />
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <Outlet />
       </div>
     </div>

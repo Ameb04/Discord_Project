@@ -44,21 +44,25 @@ function UserCard({ user }: UserCardProps) {
 
   return (
     <li>
-      <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 shadow-lg shadow-black/20 transition hover:border-white/20 hover:bg-white/[0.07]">
+      <div className="group/card rounded-2xl border border-border bg-card/50 p-4 shadow-lg shadow-black/20 backdrop-blur-sm transition-colors hover:border-primary/40 hover:bg-card/80">
         <div className="flex min-h-16 items-center gap-4">
           <Link
             to={`/profile/${encodeURIComponent(user.phone_number)}`}
-            className="group flex min-w-0 flex-1 items-center gap-4 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white/70"
+            className="group flex min-w-0 flex-1 items-center gap-4 rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
             aria-label={`View ${displayName}'s profile`}
           >
-            <Avatar className="size-12 shrink-0">
+            <Avatar className="size-12 shrink-0 border border-border">
               {user.avatar_url ? <AvatarImage src={user.avatar_url} alt={displayName} /> : null}
-              <AvatarFallback>{initials}</AvatarFallback>
+              <AvatarFallback className="bg-primary/15 font-semibold text-foreground">
+                {initials}
+              </AvatarFallback>
             </Avatar>
 
             <div className="min-w-0 flex-1">
-              <p className="truncate font-semibold text-white">{displayName}</p>
-              <p className="mt-1 truncate text-sm text-white/50">{user.phone_number}</p>
+              <p className="truncate font-semibold text-foreground group-hover:text-primary">
+                {displayName}
+              </p>
+              <p className="mt-0.5 truncate text-sm text-muted-foreground">{user.phone_number}</p>
               {user.tag ? (
                 <Badge variant="secondary" className="mt-2">
                   {user.tag.title}
@@ -70,7 +74,6 @@ function UserCard({ user }: UserCardProps) {
           {!isSelf ? (
             <Button
               type="button"
-              variant="secondary"
               size="sm"
               disabled={isStartingChat}
               onClick={handleStartChat}

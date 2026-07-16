@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { KeyRound, Sparkles, User } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { AuthShell } from "../components/auth/AuthShell";
@@ -6,6 +7,8 @@ import { AuthCard } from "../components/auth/AuthCard";
 import { CountryPhoneField } from "../components/auth/CountryPhoneField";
 import { GenderSelect } from "../components/auth/GenderSelect";
 import { TextField } from "../components/auth/TextField";
+import { FormError } from "../components/auth/FormError";
+import { Button } from "@/components/ui/button";
 
 function splitFullName(fullName: string): { first_name: string; last_name: string } {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
@@ -54,19 +57,20 @@ export function SignupPage() {
 
   return (
     <AuthShell
-      visualTitle="Create your account."
-      visualText="Sign up with a clean, minimal form that matches the same silver-and-black style."
+      visualTitle="Join the conversation in seconds."
+      visualText="Create your account and start messaging people directly — no clutter, just chat."
       visualBullets={[
-        "Simple form with only the essentials",
-        "Phone number first, then password",
-        "A calm layout that is easy to read",
+        "Only the essentials — set up in under a minute",
+        "Your profile, avatar, and tags in one place",
+        "Private, direct conversations from day one",
       ]}
     >
-      <AuthCard title="Sign up" description="Create your account in a few steps.">
-        <form onSubmit={submit} className="grid gap-5">
+      <AuthCard title="Create your account" description="Just a few details and you're in.">
+        <form onSubmit={submit} className="grid gap-4">
           <TextField
             label="Full name"
             placeholder="Enter your full name"
+            icon={<User className="size-4" />}
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
             autoComplete="name"
@@ -78,7 +82,6 @@ export function SignupPage() {
             phoneNumber={phoneNumber}
             onCountryCodeChange={setCountryCode}
             onPhoneNumberChange={setPhoneNumber}
-            helperText="Choose your country code, then type the rest of the phone number."
           />
 
           <GenderSelect label="Gender" value={gender} onChange={setGender} />
@@ -88,28 +91,22 @@ export function SignupPage() {
             type="password"
             autoComplete="new-password"
             placeholder="Create a password"
+            icon={<KeyRound className="size-4" />}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
 
-          {(localError || error) ? (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white/70">
-              {localError || error}
-            </div>
-          ) : null}
+          <FormError message={localError || error} />
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="inline-flex h-12 items-center justify-center rounded-2xl bg-white px-5 text-sm font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {submitting ? "Signing up..." : "Sign up"}
-          </button>
+          <Button type="submit" size="lg" disabled={submitting} className="mt-1 w-full">
+            <Sparkles className="size-4" aria-hidden="true" />
+            {submitting ? "Creating account..." : "Create account"}
+          </Button>
         </form>
 
-        <div className="pt-1 text-sm text-white/55">
-          already have account?{" "}
-          <Link to="/login" className="font-semibold text-white underline decoration-white/30 underline-offset-4">
+        <div className="mt-6 text-center text-sm text-muted-foreground">
+          Already have an account?{" "}
+          <Link to="/login" className="font-semibold text-primary hover:underline underline-offset-4">
             Login
           </Link>
         </div>

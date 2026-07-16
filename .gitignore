@@ -36,7 +36,9 @@ htmlcov/
 # Django
 *.log
 db.sqlite3
+# User-uploaded files must never be committed (recreated at runtime).
 media/
+private_media/
 staticfiles/
 static/
 local_settings.py
