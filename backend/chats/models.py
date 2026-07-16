@@ -92,6 +92,13 @@ class Pv(Chat):
         primary_key=True,
         related_name="pv",
     )
+    direct_key = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Deterministic key for the two direct-chat participant identifiers.",
+    )
     members = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         through="PvMembership",

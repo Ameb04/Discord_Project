@@ -19,7 +19,9 @@ class File(models.Model):
 
     name = models.CharField(max_length=255)
     type = models.CharField(max_length=100)
-    link = models.URLField(max_length=1000)
+    link = models.URLField(max_length=1000, blank=True)
+    storage_path = models.CharField(max_length=1000, blank=True)
+    size = models.PositiveBigIntegerField(null=True, blank=True)
 
     class Meta:
         db_table = "files"

@@ -180,3 +180,4 @@ STATIC_URL = 'static/'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+PRIVATE_MEDIA_ROOT = BASE_DIR / 'private_media'

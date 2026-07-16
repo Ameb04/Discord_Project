@@ -6,6 +6,7 @@ import { LandingPage } from "../pages/LandingPage";
 import { LoginPage } from "../pages/LoginPage";
 import { SignupPage } from "../pages/SignupPage";
 import ProfilePage from "../pages/ProfilePage";
+import ChatPage from "../pages/ChatPage";
 
 function LoadingScreen() {
   return (
@@ -91,6 +92,7 @@ export function AppRouter() {
           <Route path="/search" element={<SearchResultsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/profile/:phone_number" element={<ProfilePage />} />
+          <Route path="/chats/:chatId" element={<ChatPage />} />
         </Route>
       </Route>
 
