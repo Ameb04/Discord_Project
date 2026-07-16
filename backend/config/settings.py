@@ -31,7 +31,8 @@ DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+    # 'backend' is the docker-compose service name the Vite proxy targets.
+    for host in os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,backend').split(',')
     if host.strip()
 ]
 
@@ -181,3 +182,67 @@ STATIC_URL = 'static/'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 PRIVATE_MEDIA_ROOT = BASE_DIR / 'private_media'
+
+
+# ---------------------------------------------------------------------------
+# Object storage (MinIO / S3-compatible)
+# ---------------------------------------------------------------------------
+# User-uploaded media is stored in an S3-compatible object store (MinIO in
+# docker-compose) rather than on the app container's filesystem. Two buckets:
+#   * public  ("media")         -> avatars, world-readable, served directly.
+#   * private ("private-media") -> chat attachments, streamed through Django
+#                                  so access control is enforced per request.
+# When USE_S3 is off (the default, e.g. tests / bare-metal dev) Django falls
+# back to the local filesystem, so nothing else has to change.
+USE_S3 = os.environ.get('USE_S3', 'False') == 'True'
+
+if USE_S3:
+    AWS_ACCESS_KEY_ID = os.environ.get('MINIO_ACCESS_KEY', 'minioadmin')
+    AWS_SECRET_ACCESS_KEY = os.environ.get('MINIO_SECRET_KEY', 'minioadmin')
+    # Endpoint the backend uses to talk to the store (server-to-server).
+    AWS_S3_ENDPOINT_URL = os.environ.get('S3_ENDPOINT_URL', 'http://minio:9000')
+    AWS_S3_REGION_NAME = os.environ.get('S3_REGION_NAME', 'us-east-1')
+    AWS_S3_SIGNATURE_VERSION = 's3v4'
+    # MinIO only supports path-style addressing (host/bucket/key).
+    AWS_S3_ADDRESSING_STYLE = 'path'
+
+    S3_PUBLIC_BUCKET = os.environ.get('S3_PUBLIC_BUCKET', 'media')
+    S3_PRIVATE_BUCKET = os.environ.get('S3_PRIVATE_BUCKET', 'private-media')
+
+    # Host the *browser* uses to fetch public objects (avatars). Inside Docker
+    # the backend reaches MinIO at minio:9000, but the browser reaches it at
+    # localhost:9000 — so public URLs are generated against this host.
+    _public_base = os.environ.get('S3_PUBLIC_URL', 'http://localhost:9000')
+    _public_scheme, _, _public_host = _public_base.rpartition('://')
+    _public_host = (_public_host or _public_base).rstrip('/')
+    S3_URL_PROTOCOL = f'{_public_scheme or "http"}:'
+    S3_PUBLIC_CUSTOM_DOMAIN = f'{_public_host}/{S3_PUBLIC_BUCKET}'
+
+    STORAGES = {
+        # Public bucket — avatars (ImageField). No querystring auth; URLs point
+        # straight at the public MinIO host.
+        'default': {
+            'BACKEND': 'storages.backends.s3.S3Storage',
+            'OPTIONS': {
+                'bucket_name': S3_PUBLIC_BUCKET,
+                'querystring_auth': False,
+                'file_overwrite': False,
+                'custom_domain': S3_PUBLIC_CUSTOM_DOMAIN,
+                'url_protocol': S3_URL_PROTOCOL,
+            },
+        },
+        # Private bucket — chat attachments. Never exposed directly; the
+        # download view streams objects after checking chat membership.
+        'private_media': {
+            'BACKEND': 'storages.backends.s3.S3Storage',
+            'OPTIONS': {
+                'bucket_name': S3_PRIVATE_BUCKET,
+                'querystring_auth': True,
+                'file_overwrite': False,
+                'default_acl': 'private',
+            },
+        },
+        'staticfiles': {
+            'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+        },
+    }

@@ -1,6 +1,3 @@
-from pathlib import Path
-
-from django.conf import settings
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import FileResponse
@@ -20,7 +17,11 @@ from .serializers import (
     NormalMessageSerializer,
     TextMessageCreateSerializer,
 )
-from .services import create_media_message, create_text_message
+from .services import (
+    create_media_message,
+    create_text_message,
+    get_private_storage,
+)
 
 
 class MessageListCreateView(APIView):
@@ -105,12 +106,13 @@ class AttachmentDownloadView(APIView):
         if not can_access_chat(request.user, message.chat):
             raise PermissionDenied("You do not have permission to access this chat.")
 
-        absolute_path = _private_attachment_path(message.file.storage_path)
-        if absolute_path is None or not absolute_path.is_file():
+        storage = get_private_storage()
+        storage_path = message.file.storage_path
+        if not storage_path or not storage.exists(storage_path):
             raise NotFound("Attachment file is unavailable.")
 
         return FileResponse(
-            absolute_path.open("rb"),
+            storage.open(storage_path, "rb"),
             as_attachment=True,
             filename=message.file.name,
             content_type=message.file.type or "application/octet-stream",
@@ -123,14 +125,3 @@ def _validation_error_detail(error):
     if hasattr(error, "messages"):
         return error.messages
     return str(error)
-
-
-def _private_attachment_path(storage_path):
-    if not storage_path:
-        return None
-
-    root = Path(settings.PRIVATE_MEDIA_ROOT).resolve()
-    absolute_path = (root / storage_path).resolve()
-    if root != absolute_path and root not in absolute_path.parents:
-        return None
-    return absolute_path

@@ -1,8 +1,8 @@
-from pathlib import Path
 from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.files.storage import FileSystemStorage, storages
 from django.db import transaction
 from django.utils.text import get_valid_filename
 
@@ -10,6 +10,19 @@ from chats.permissions import can_send_to_chat
 from core.models import File
 
 from .models import NormalMessage
+
+
+def get_private_storage():
+    """Return the storage backend for private chat attachments.
+
+    Uses the S3/MinIO ``private_media`` bucket when object storage is enabled,
+    otherwise a local filesystem store rooted at ``PRIVATE_MEDIA_ROOT``. In
+    local mode it is built per call so tests that override ``PRIVATE_MEDIA_ROOT``
+    take effect immediately.
+    """
+    if getattr(settings, "USE_S3", False):
+        return storages["private_media"]
+    return FileSystemStorage(location=settings.PRIVATE_MEDIA_ROOT)
 
 
 def create_text_message(sender, chat, content):
@@ -39,19 +52,19 @@ def create_media_message(sender, chat, uploaded_file, content=""):
     _validate_uploaded_file(uploaded_file)
     normalized_content = _validate_optional_content(content)
     safe_name = _safe_file_name(uploaded_file.name)
+    file_size = uploaded_file.size
+    file_type = getattr(uploaded_file, "content_type", "") or ""
     storage_path = _build_private_storage_path(chat, safe_name)
-    absolute_path = _absolute_private_path(storage_path)
 
-    saved_path = None
+    storage = get_private_storage()
+    saved_path = storage.save(storage_path, uploaded_file)
     try:
-        _write_private_file(uploaded_file, absolute_path)
-        saved_path = absolute_path
         with transaction.atomic():
             stored_file = File.objects.create(
                 name=safe_name,
-                type=getattr(uploaded_file, "content_type", "") or "",
-                storage_path=storage_path,
-                size=uploaded_file.size,
+                type=file_type,
+                storage_path=saved_path,
+                size=file_size,
             )
             return NormalMessage.objects.create(
                 sender=sender,
@@ -60,8 +73,7 @@ def create_media_message(sender, chat, uploaded_file, content=""):
                 file=stored_file,
             )
     except Exception:
-        if saved_path is not None:
-            _delete_private_file(saved_path)
+        storage.delete(saved_path)
         raise
 
 
@@ -110,29 +122,3 @@ def _safe_file_name(file_name):
 
 def _build_private_storage_path(chat, safe_name):
     return f"attachments/chat_{chat.pk}/{uuid4().hex}_{safe_name}"
-
-
-def _absolute_private_path(storage_path):
-    root = Path(settings.PRIVATE_MEDIA_ROOT).resolve()
-    absolute_path = (root / storage_path).resolve()
-    if root != absolute_path and root not in absolute_path.parents:
-        raise ValidationError({"file": "File storage path is invalid."})
-    return absolute_path
-
-
-def _write_private_file(uploaded_file, absolute_path):
-    absolute_path.parent.mkdir(parents=True, exist_ok=True)
-    with absolute_path.open("wb") as destination:
-        chunks = getattr(uploaded_file, "chunks", None)
-        if callable(chunks):
-            for chunk in uploaded_file.chunks():
-                destination.write(chunk)
-        else:
-            destination.write(uploaded_file.read())
-
-
-def _delete_private_file(absolute_path):
-    try:
-        absolute_path.unlink()
-    except FileNotFoundError:
-        pass

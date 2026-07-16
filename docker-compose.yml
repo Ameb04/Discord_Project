@@ -15,6 +15,36 @@ services:
     ports:
       - "6379:6379"
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - minio_data:/data
+
+  # One-shot init: create the public + private buckets and make the public
+  # bucket world-readable (so avatars can be served directly). Retries until
+  # MinIO is accepting connections, then exits.
+  createbuckets:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin}; do
+        echo 'waiting for minio...'; sleep 2;
+      done;
+      mc mb --ignore-existing local/media;
+      mc mb --ignore-existing local/private-media;
+      mc anonymous set download local/media;
+      echo 'MinIO buckets ready';
+      "
+
   backend:
     build: ./backend
     volumes:
@@ -26,9 +56,24 @@ services:
     environment:
       # Required for Django autoreload on Docker bind mounts (especially on Windows)
       WATCHFILES_FORCE_POLLING: "true"
+      # Stream runserver output live (no block-buffering in the container log).
+      PYTHONUNBUFFERED: "1"
+      # The Vite dev server proxies /api to http://backend:8000 with
+      # changeOrigin, so Django receives Host: backend:8000 and must allow it.
+      ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      # Object storage (MinIO). The backend talks to minio:9000 internally,
+      # while browsers fetch public objects from S3_PUBLIC_URL (localhost:9000).
+      USE_S3: "True"
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_URL: http://localhost:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      S3_PUBLIC_BUCKET: media
+      S3_PRIVATE_BUCKET: private-media
     depends_on:
       - db
       - redis
+      - minio
     command: python manage.py runserver 0.0.0.0:8000
 
   frontend:
@@ -49,3 +94,4 @@ services:
 
 volumes:
   postgres_data:
+  minio_data:
