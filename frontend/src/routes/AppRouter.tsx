@@ -1,12 +1,13 @@
-import { Link, NavLink, Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import Navbar from "../components/Navbar";
 import { useAuth } from "../context/AuthContext";
 import SearchResultsPage from "../pages/SearchResultsPage";
 import SettingsPage from "../pages/SettingsPage";
+import HomePage from "../pages/HomePage";
 import { LandingPage } from "../pages/LandingPage";
 import { LoginPage } from "../pages/LoginPage";
 import { SignupPage } from "../pages/SignupPage";
 import ProfilePage from "../pages/ProfilePage";
-import ChatPage from "../pages/ChatPage";
 
 function LoadingScreen() {
   return (
@@ -22,14 +23,14 @@ function RootRoute() {
   const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) return <LoadingScreen />;
-  return isAuthenticated ? <Navigate to="/search" replace /> : <LandingPage />;
+  return isAuthenticated ? <Navigate to="/home" replace /> : <LandingPage />;
 }
 
 function PublicOnlyRoute() {
   const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) return <LoadingScreen />;
-  if (isAuthenticated) return <Navigate to="/search" replace />;
+  if (isAuthenticated) return <Navigate to="/home" replace />;
 
   return <Outlet />;
 }
@@ -45,34 +46,11 @@ function ProtectedRoute() {
 
 function AppLayout() {
   return (
-    <div className="min-h-screen bg-[#090909] text-white">
-      <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
-        <Link className="text-lg font-semibold tracking-tight text-white" to="/search">
-          Discord Project
-        </Link>
-
-        <nav aria-label="Main navigation" className="flex items-center gap-4 text-sm">
-          <NavLink
-            to="/search"
-            className={({ isActive }) =>
-              isActive ? "text-white" : "text-white/60 transition hover:text-white"
-            }
-          >
-            Search
-          </NavLink>
-
-          <NavLink
-            to="/settings"
-            className={({ isActive }) =>
-              isActive ? "text-white" : "text-white/60 transition hover:text-white"
-            }
-          >
-            Settings
-          </NavLink>
-        </nav>
-      </header>
-
-      <Outlet />
+    <div className="flex min-h-screen flex-col bg-[#090909] text-white">
+      <Navbar />
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <Outlet />
+      </div>
     </div>
   );
 }
@@ -89,10 +67,11 @@ export function AppRouter() {
 
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
+          <Route path="/home" element={<HomePage />} />
           <Route path="/search" element={<SearchResultsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/profile/:phone_number" element={<ProfilePage />} />
-          <Route path="/chats/:chatId" element={<ChatPage />} />
+          <Route path="/chats/:chatId" element={<HomePage />} />
         </Route>
       </Route>
 

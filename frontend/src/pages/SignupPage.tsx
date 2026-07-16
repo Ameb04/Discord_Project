@@ -48,7 +48,7 @@ export function SignupPage() {
     setSubmitting(false);
 
     if (user) {
-      navigate("/search", { replace: true });
+      navigate("/home", { replace: true });
     }
   };
 

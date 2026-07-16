@@ -1,5 +1,10 @@
 import client from "./client";
-import type { ChatMessage, DirectChat } from "../types/chat";
+import type { ChatMessage, ConversationIndex, DirectChat } from "../types/chat";
+
+export async function getConversationIndex(): Promise<ConversationIndex> {
+  const response = await client.get<ConversationIndex>("/api/chats/");
+  return response.data;
+}
 
 export async function startDirectChat(targetUserPhoneNumber: string): Promise<DirectChat> {
   const response = await client.post<DirectChat>("/api/chats/direct/", {

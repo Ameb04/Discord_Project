@@ -34,7 +34,7 @@ export function LoginPage() {
     setSubmitting(false);
 
     if (user) {
-      navigate("/search", { replace: true });
+      navigate("/home", { replace: true });
     }
   };
 
