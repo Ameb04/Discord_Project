@@ -1,3 +1,4 @@
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from accounts.models import User
@@ -108,3 +109,27 @@ class ChatPermissionTests(TestCase):
 
         self.assert_cannot_access_or_send(self.owner, group)
         self.assert_cannot_access_or_send(self.owner, topic)
+
+
+class PvDirectKeyTests(TestCase):
+    def test_direct_key_field_is_nullable_and_unique(self):
+        field = Pv._meta.get_field("direct_key")
+
+        self.assertTrue(field.null)
+        self.assertTrue(field.blank)
+        self.assertTrue(field.unique)
+        self.assertEqual(field.max_length, 255)
+
+    def test_direct_key_must_be_unique_when_set(self):
+        Pv.objects.create(name="First direct chat", direct_key="1000:2000")
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Pv.objects.create(name="Duplicate direct chat", direct_key="1000:2000")
+
+    def test_multiple_existing_pvs_can_have_no_direct_key(self):
+        first = Pv.objects.create(name="Legacy direct chat")
+        second = Pv.objects.create(name="Another legacy direct chat")
+
+        self.assertIsNone(first.direct_key)
+        self.assertIsNone(second.direct_key)
