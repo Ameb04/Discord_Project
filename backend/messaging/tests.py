@@ -549,6 +549,178 @@ class MediaMessageUploadApiTests(TestCase):
             self.assertEqual(stored_paths, [])
 
 
+class AttachmentDownloadApiTests(TestCase):
+    def setUp(self):
+        self.temp_dir = TemporaryDirectory()
+        self.private_root = Path(self.temp_dir.name) / "private"
+        self.public_root = Path(self.temp_dir.name) / "media"
+        self.settings_override = override_settings(
+            PRIVATE_MEDIA_ROOT=self.private_root,
+            MEDIA_ROOT=self.public_root,
+        )
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
+        self.addCleanup(self.temp_dir.cleanup)
+
+        self.owner = User.objects.create_user(
+            phone_number="1000", password="password"
+        )
+        self.member = User.objects.create_user(
+            phone_number="2000", password="password"
+        )
+        self.third_user = User.objects.create_user(
+            phone_number="3000", password="password"
+        )
+
+    def authenticated_client(self, user):
+        client = APIClient()
+        session = client.session
+        session[APP_USER_SESSION_KEY] = user.pk
+        session.save()
+        return client
+
+    def attachment_url(self, message):
+        return f"/api/messages/{message.pk}/attachment/"
+
+    def create_pv(self):
+        pv = Pv.objects.create(name="Direct chat")
+        PvMembership.objects.create(pv=pv, user=self.owner)
+        PvMembership.objects.create(pv=pv, user=self.member)
+        return pv
+
+    def create_group(self):
+        group = Group.objects.create(name="Group chat", owner=self.owner)
+        GroupMembership.objects.create(group=group, user=self.member)
+        return group
+
+    def create_media(self, chat, sender=None, content=b"file bytes", name="file.txt"):
+        return create_media_message(
+            sender or self.owner,
+            chat,
+            self.upload(name, content, "text/plain"),
+        )
+
+    def test_authorized_pv_member_can_download_attachment(self):
+        pv = self.create_pv()
+        message = self.create_media(pv, content=b"private bytes", name="private.txt")
+        client = self.authenticated_client(self.member)
+
+        response = client.get(self.attachment_url(message))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.response_bytes(response), b"private bytes")
+
+    def test_unauthorized_pv_third_user_cannot_download_attachment(self):
+        pv = self.create_pv()
+        message = self.create_media(pv, content=b"private bytes")
+        client = self.authenticated_client(self.third_user)
+
+        response = client.get(self.attachment_url(message))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(hasattr(response, "streaming_content"))
+
+    def test_authorized_group_owner_and_member_can_download_attachment(self):
+        group = self.create_group()
+        message = self.create_media(group, content=b"group bytes", name="group.txt")
+
+        owner_response = self.authenticated_client(self.owner).get(
+            self.attachment_url(message)
+        )
+        member_response = self.authenticated_client(self.member).get(
+            self.attachment_url(message)
+        )
+
+        self.assertEqual(owner_response.status_code, 200)
+        self.assertEqual(member_response.status_code, 200)
+        self.assertEqual(self.response_bytes(owner_response), b"group bytes")
+        self.assertEqual(self.response_bytes(member_response), b"group bytes")
+
+    def test_unauthorized_group_user_cannot_download_attachment(self):
+        group = self.create_group()
+        message = self.create_media(group, content=b"group bytes")
+        client = self.authenticated_client(self.third_user)
+
+        response = client.get(self.attachment_url(message))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(hasattr(response, "streaming_content"))
+
+    def test_unauthenticated_request_is_rejected(self):
+        pv = self.create_pv()
+        message = self.create_media(pv)
+
+        response = APIClient().get(self.attachment_url(message))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_nonexistent_message_returns_404(self):
+        client = self.authenticated_client(self.owner)
+
+        response = client.get("/api/messages/9999/attachment/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_message_without_attachment_returns_404(self):
+        pv = self.create_pv()
+        message = create_text_message(self.owner, pv, "Text only")
+        client = self.authenticated_client(self.owner)
+
+        response = client.get(self.attachment_url(message))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_missing_physical_file_returns_404(self):
+        pv = self.create_pv()
+        message = self.create_media(pv)
+        self.private_path(message.file).unlink()
+        client = self.authenticated_client(self.owner)
+
+        response = client.get(self.attachment_url(message))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_successful_response_uses_attachment_content_disposition(self):
+        pv = self.create_pv()
+        message = self.create_media(pv, name="download.txt")
+        client = self.authenticated_client(self.owner)
+
+        response = client.get(self.attachment_url(message))
+
+        self.assertEqual(response.status_code, 200)
+        content_disposition = response["Content-Disposition"]
+        self.assertIn("attachment", content_disposition)
+        self.assertIn("download.txt", content_disposition)
+
+    def test_serializer_does_not_expose_storage_path_and_has_download_url(self):
+        pv = self.create_pv()
+        message = self.create_media(pv)
+        client = self.authenticated_client(self.owner)
+
+        response = client.get(f"/api/chats/{pv.pk}/messages/")
+        attachment = response.data[0]["attachment"]
+        response_text = str(response.data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            attachment["download_url"],
+            f"/api/messages/{message.pk}/attachment/",
+        )
+        self.assertNotIn("storage_path", attachment)
+        self.assertNotIn("attachments/chat_", response_text)
+        self.assertNotIn(str(settings.PRIVATE_MEDIA_ROOT), response_text)
+        self.assertNotIn(str(settings.MEDIA_ROOT), response_text)
+
+    def upload(self, name, content, content_type):
+        return SimpleUploadedFile(name, content, content_type=content_type)
+
+    def private_path(self, stored_file):
+        return (Path(settings.PRIVATE_MEDIA_ROOT) / stored_file.storage_path).resolve()
+
+    def response_bytes(self, response):
+        return b"".join(response.streaming_content)
+
+
 class MediaMessageCreationServiceTests(TestCase):
     def setUp(self):
         self.temp_dir = TemporaryDirectory()

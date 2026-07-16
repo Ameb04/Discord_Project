@@ -43,4 +43,5 @@ class NormalMessageSerializer(serializers.ModelSerializer):
             "name": obj.file.name,
             "type": obj.file.type,
             "size": obj.file.size,
+            "download_url": f"/api/messages/{obj.pk}/attachment/",
         }
