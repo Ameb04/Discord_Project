@@ -2,6 +2,7 @@ import { ArrowLeft, MessageCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getChatMessages } from "../api/chats";
+import MessageComposer from "../components/chat/MessageComposer";
 import MessageList from "../components/chat/MessageList";
 import { Button } from "../components/ui/button";
 import { Skeleton } from "../components/ui/skeleton";
@@ -78,6 +79,15 @@ function ChatPage() {
     };
   }, [parsedChatId]);
 
+  function handleMessageSent(message: ChatMessage) {
+    setMessages((currentMessages) => {
+      if (currentMessages.some((currentMessage) => currentMessage.id === message.id)) {
+        return currentMessages;
+      }
+      return [...currentMessages, message];
+    });
+  }
+
   return (
     <main className="mx-auto flex min-h-[calc(100vh-73px)] w-full max-w-5xl flex-col px-6 py-8 sm:px-8 lg:py-10">
       <div className="mb-5 flex items-center justify-between gap-4">
@@ -141,6 +151,14 @@ function ChatPage() {
             <MessageList messages={messages} currentUser={user} />
           ) : null}
         </div>
+
+        {parsedChatId !== null ? (
+          <MessageComposer
+            chatId={parsedChatId}
+            disabled={isLoading || Boolean(error)}
+            onMessageSent={handleMessageSent}
+          />
+        ) : null}
       </section>
     </main>
   );
