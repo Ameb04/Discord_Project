@@ -20,6 +20,7 @@ from .serializers import (
 from .services import (
     create_media_message,
     create_text_message,
+    edit_text_message,
     get_private_storage,
 )
 
@@ -90,6 +91,35 @@ class MediaMessageCreateView(APIView):
             message, context={"request": request}
         )
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class MessageUpdateView(APIView):
+    """PATCH /api/chats/<chat_id>/messages/<message_id>/."""
+
+    def patch(self, request, chat_id, message_id):
+        chat = get_object_or_404(Chat, pk=chat_id)
+        if not can_access_chat(request.user, chat):
+            raise PermissionDenied("You do not have permission to access this chat.")
+
+        request_serializer = TextMessageCreateSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+
+        try:
+            message = edit_text_message(
+                request.user,
+                chat,
+                message_id,
+                request_serializer.validated_data["content"],
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(_validation_error_detail(exc)) from exc
+        except DjangoPermissionDenied as exc:
+            raise PermissionDenied(str(exc)) from exc
+
+        response_serializer = NormalMessageSerializer(
+            message, context={"request": request}
+        )
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 
 class AttachmentDownloadView(APIView):

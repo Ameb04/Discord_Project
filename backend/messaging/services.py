@@ -77,6 +77,31 @@ def create_media_message(sender, chat, uploaded_file, content=""):
         raise
 
 
+def edit_text_message(sender, chat, message_id, content):
+    """Edit an existing text message."""
+    _validate_sender(sender)
+
+    try:
+        message = NormalMessage.objects.get(pk=message_id, chat=chat, is_deleted=False)
+    except NormalMessage.DoesNotExist:
+        raise ValidationError({"message": "Message not found."})
+
+    if message.sender_id != sender.pk:
+        raise PermissionDenied("You can only edit your own messages.")
+
+    if message.file_id is not None:
+        raise ValidationError({"message": "Cannot edit media messages."})
+
+    normalized_content = _validate_text_content(content)
+
+    if message.content != normalized_content:
+        message.content = normalized_content
+        message.is_edited = True
+        message.save(update_fields=['content', 'is_edited'])
+
+    return message
+
+
 def _validate_sender(sender):
     if not (
         sender

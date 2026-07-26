@@ -13,6 +13,17 @@ export async function startDirectChat(targetUserPhoneNumber: string): Promise<Di
   return response.data;
 }
 
+export async function editTextMessage(
+  chatId: number,
+  messageId: number,
+  content: string
+): Promise<ChatMessage> {
+  const response = await client.patch<ChatMessage>(`/api/chats/${chatId}/messages/${messageId}/`, {
+    content,
+  });
+  return response.data;
+}
+
 export async function getChatMessages(chatId: number): Promise<ChatMessage[]> {
   const response = await client.get<ChatMessage[]>(`/api/chats/${chatId}/messages/`);
   return response.data;

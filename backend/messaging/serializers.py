@@ -28,7 +28,7 @@ class NormalMessageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = NormalMessage
-        fields = ("id", "chat", "sender", "content", "sent_at", "attachment")
+        fields = ("id", "chat", "sender", "content", "sent_at", "attachment", "is_edited")
 
     def get_sender(self, obj):
         if obj.sender is None:
