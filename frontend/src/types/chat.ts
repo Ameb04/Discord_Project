@@ -39,4 +39,5 @@ export type ChatMessage = {
   content: string;
   sent_at: string;
   attachment: AttachmentMetadata | null;
+  is_edited?: boolean;
 };
