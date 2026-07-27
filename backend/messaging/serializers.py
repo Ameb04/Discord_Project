@@ -12,6 +12,16 @@ class TextMessageCreateSerializer(serializers.Serializer):
     )
 
 
+class MessageUpdateSerializer(serializers.Serializer):
+    content = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        trim_whitespace=False,
+    )
+    file = serializers.FileField(required=False, allow_null=True)
+    remove_file = serializers.BooleanField(required=False, default=False)
+
+
 class MediaMessageCreateSerializer(serializers.Serializer):
     file = serializers.FileField()
     content = serializers.CharField(

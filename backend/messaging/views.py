@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+import rest_framework.parsers
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
@@ -14,13 +15,14 @@ from chats.permissions import can_access_chat
 from .models import Message, NormalMessage
 from .serializers import (
     MediaMessageCreateSerializer,
+    MessageUpdateSerializer,
     NormalMessageSerializer,
     TextMessageCreateSerializer,
 )
 from .services import (
     create_media_message,
     create_text_message,
-    edit_text_message,
+    edit_message,
     get_private_storage,
 )
 
@@ -96,20 +98,37 @@ class MediaMessageCreateView(APIView):
 class MessageUpdateView(APIView):
     """PATCH /api/chats/<chat_id>/messages/<message_id>/."""
 
+    parser_classes = [MultiPartParser, FormParser, rest_framework.parsers.JSONParser]
+
     def patch(self, request, chat_id, message_id):
         chat = get_object_or_404(Chat, pk=chat_id)
         if not can_access_chat(request.user, chat):
             raise PermissionDenied("You do not have permission to access this chat.")
 
-        request_serializer = TextMessageCreateSerializer(data=request.data)
+        # Data from form-data can have 'true'/'false' for booleans, DRF handles it
+        # but if using JSON, it handles native booleans.
+        request_serializer = MessageUpdateSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
 
+        validated_data = request_serializer.validated_data
+
+        # We need to distinguish between missing and None for content
+        content = validated_data.get("content")
+        if "content" not in request.data:
+            content = None
+
+        remove_file = validated_data.get("remove_file", False)
+        if str(request.data.get("remove_file", "")).lower() == "true":
+            remove_file = True
+
         try:
-            message = edit_text_message(
+            message = edit_message(
                 request.user,
                 chat,
                 message_id,
-                request_serializer.validated_data["content"],
+                content=content,
+                uploaded_file=validated_data.get("file"),
+                remove_file=remove_file,
             )
         except DjangoValidationError as exc:
             raise ValidationError(_validation_error_detail(exc)) from exc

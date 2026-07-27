@@ -1,6 +1,6 @@
-import { Pencil, X, Check } from "lucide-react";
-import { useState, useRef, useEffect, type KeyboardEvent } from "react";
-import { editTextMessage } from "../../api/chats";
+import { Pencil, X, Check, Paperclip, FileText } from "lucide-react";
+import { useState, useRef, useEffect, useId, type KeyboardEvent } from "react";
+import { editMessage } from "../../api/chats";
 import type { ChatMessage } from "../../types/chat";
 import type { User } from "../../types/user";
 import AttachmentLink from "./AttachmentLink";
@@ -32,15 +32,19 @@ function formatSentAt(value: string) {
 function MessageItem({ message, currentUser, onMessageEdited }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [removeFile, setRemoveFile] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputId = useId();
 
   const isOwnMessage =
     Boolean(currentUser?.phone_number) &&
     message.sender?.phone_number === currentUser?.phone_number;
 
-  const canEdit = isOwnMessage && !message.attachment; // Usually, we might just restrict editing text messages
+  const canEdit = isOwnMessage;
 
   useEffect(() => {
     if (isEditing && textareaRef.current) {
@@ -51,14 +55,17 @@ function MessageItem({ message, currentUser, onMessageEdited }: MessageItemProps
     }
   }, [isEditing]);
 
+  const willHaveFile = (!removeFile && message.attachment) || selectedFile;
+  const canSave = Boolean(editContent.trim()) || Boolean(willHaveFile);
+
   async function handleSave() {
     const trimmed = editContent.trim();
-    if (!trimmed) {
-      setError("Message cannot be empty.");
+    if (!canSave) {
+      setError("Message must have content or an attachment.");
       return;
     }
 
-    if (trimmed === message.content) {
+    if (trimmed === message.content && !selectedFile && !removeFile) {
       setIsEditing(false);
       return;
     }
@@ -67,7 +74,7 @@ function MessageItem({ message, currentUser, onMessageEdited }: MessageItemProps
     setError("");
 
     try {
-      const updatedMessage = await editTextMessage(message.chat, message.id, trimmed);
+      const updatedMessage = await editMessage(message.chat, message.id, trimmed, selectedFile || undefined, removeFile);
       onMessageEdited(updatedMessage);
       setIsEditing(false);
     } catch {
@@ -85,8 +92,16 @@ function MessageItem({ message, currentUser, onMessageEdited }: MessageItemProps
       event.preventDefault();
       setIsEditing(false);
       setEditContent(message.content);
+      setSelectedFile(null);
+      setRemoveFile(false);
       setError("");
     }
+  }
+
+  function formatFileSize(size: number) {
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   return (
@@ -125,6 +140,83 @@ function MessageItem({ message, currentUser, onMessageEdited }: MessageItemProps
 
         {isEditing ? (
           <div className="mt-2 flex flex-col gap-2">
+            {/* Attachment preview / edit area */}
+            {selectedFile ? (
+              <div className="flex max-w-full items-center justify-between gap-3 rounded-2xl border border-border bg-white/[0.04] px-3 py-2 text-sm text-foreground/80">
+                <div className="flex min-w-0 items-center gap-3">
+                  <FileText className="size-4 shrink-0 text-primary" aria-hidden="true" />
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-foreground">{selectedFile.name}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {formatFileSize(selectedFile.size)}
+                    </span>
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  disabled={isSaving}
+                  aria-label="Remove selected file"
+                  onClick={() => setSelectedFile(null)}
+                >
+                  <X className="size-4" aria-hidden="true" />
+                </Button>
+              </div>
+            ) : message.attachment && !removeFile ? (
+              <div className="flex max-w-full items-center justify-between gap-3 rounded-2xl border border-border bg-white/[0.04] px-3 py-2 text-sm text-foreground/80">
+                <div className="flex min-w-0 items-center gap-3">
+                  <FileText className="size-4 shrink-0 text-primary" aria-hidden="true" />
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-foreground">{message.attachment.name}</span>
+                    {message.attachment.size != null && (
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {formatFileSize(message.attachment.size)}
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  disabled={isSaving}
+                  aria-label="Remove existing attachment"
+                  onClick={() => setRemoveFile(true)}
+                >
+                  <X className="size-4" aria-hidden="true" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center">
+                <input
+                  ref={fileInputRef}
+                  id={fileInputId}
+                  type="file"
+                  className="sr-only"
+                  disabled={isSaving}
+                  onChange={(event) => {
+                    const nextFile = event.target.files?.[0] ?? null;
+                    if (nextFile) {
+                      setSelectedFile(nextFile);
+                      setRemoveFile(true); // Effectively replacing the old one if it exists
+                      if (error) setError("");
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isSaving}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`h-7 text-xs ${isOwnMessage ? "bg-white/10 text-white border-white/20 hover:bg-white/20" : ""}`}
+                >
+                  <Paperclip className="mr-1 size-3" /> Attach file
+                </Button>
+              </div>
+            )}
+
             <textarea
               ref={textareaRef}
               value={editContent}
@@ -150,6 +242,8 @@ function MessageItem({ message, currentUser, onMessageEdited }: MessageItemProps
                 onClick={() => {
                   setIsEditing(false);
                   setEditContent(message.content);
+                  setSelectedFile(null);
+                  setRemoveFile(false);
                   setError("");
                 }}
               >
@@ -158,7 +252,7 @@ function MessageItem({ message, currentUser, onMessageEdited }: MessageItemProps
               <Button
                 size="sm"
                 className={isOwnMessage ? "bg-white text-primary hover:bg-white/90 h-7 text-xs" : "h-7 text-xs"}
-                disabled={isSaving || !editContent.trim()}
+                disabled={isSaving || !canSave}
                 onClick={handleSave}
               >
                 <Check className="mr-1 size-3" /> {isSaving ? "Saving..." : "Save"}

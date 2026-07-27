@@ -77,8 +77,8 @@ def create_media_message(sender, chat, uploaded_file, content=""):
         raise
 
 
-def edit_text_message(sender, chat, message_id, content):
-    """Edit an existing text message."""
+def edit_message(sender, chat, message_id, content=None, uploaded_file=None, remove_file=False):
+    """Edit an existing message, modifying its content and/or file attachment."""
     _validate_sender(sender)
 
     try:
@@ -89,15 +89,75 @@ def edit_text_message(sender, chat, message_id, content):
     if message.sender_id != sender.pk:
         raise PermissionDenied("You can only edit your own messages.")
 
-    if message.file_id is not None:
-        raise ValidationError({"message": "Cannot edit media messages."})
+    # Determine final states
+    new_content = message.content if content is None else _validate_optional_content(content)
 
-    normalized_content = _validate_text_content(content)
+    will_have_file = (
+        (message.file_id is not None and not remove_file) or
+        (uploaded_file is not None)
+    )
 
-    if message.content != normalized_content:
-        message.content = normalized_content
+    if not new_content and not will_have_file:
+        raise ValidationError({"content": "Message must have content or an attachment."})
+
+    has_changes = False
+
+    if content is not None and message.content != new_content:
+        message.content = new_content
+        has_changes = True
+
+    storage = get_private_storage()
+    old_file_to_delete = None
+    old_storage_path = None
+    new_saved_path = None
+
+    if remove_file or uploaded_file is not None:
+        if message.file:
+            old_file_to_delete = message.file
+            old_storage_path = message.file.storage_path
+            message.file = None
+            has_changes = True
+
+    if uploaded_file is not None:
+        _validate_uploaded_file(uploaded_file)
+        safe_name = _safe_file_name(uploaded_file.name)
+        file_size = uploaded_file.size
+        file_type = getattr(uploaded_file, "content_type", "") or ""
+        storage_path = _build_private_storage_path(chat, safe_name)
+
+        new_saved_path = storage.save(storage_path, uploaded_file)
+        try:
+            with transaction.atomic():
+                stored_file = File.objects.create(
+                    name=safe_name,
+                    type=file_type,
+                    storage_path=new_saved_path,
+                    size=file_size,
+                )
+                message.file = stored_file
+                if has_changes:
+                    message.is_edited = True
+                message.save(update_fields=['content', 'file', 'is_edited'])
+
+                # Delete old file only if everything succeeds
+                if old_file_to_delete:
+                    if old_storage_path:
+                        storage.delete(old_storage_path)
+                    old_file_to_delete.delete()
+
+            return message
+        except Exception:
+            if new_saved_path:
+                storage.delete(new_saved_path)
+            raise
+    elif has_changes:
         message.is_edited = True
-        message.save(update_fields=['content', 'is_edited'])
+        message.save(update_fields=['content', 'file', 'is_edited'])
+
+        if old_file_to_delete:
+            if old_storage_path:
+                storage.delete(old_storage_path)
+            old_file_to_delete.delete()
 
     return message
 
