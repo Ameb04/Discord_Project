@@ -1,5 +1,17 @@
 import client from "./client";
-import type { ChatMessage, ConversationIndex, DirectChat } from "../types/chat";
+import type {
+  ChatHistoryContextResponse,
+  ChatHistoryResponse,
+  ChatMessage,
+  ChatSearchResponse,
+  DirectChat,
+  ConversationIndex,
+} from "../types/chat";
+
+type MessageHistoryParams = {
+  before?: number;
+  limit?: number;
+};
 
 export async function getConversationIndex(): Promise<ConversationIndex> {
   const response = await client.get<ConversationIndex>("/api/chats/");
@@ -13,8 +25,43 @@ export async function startDirectChat(targetUserPhoneNumber: string): Promise<Di
   return response.data;
 }
 
-export async function getChatMessages(chatId: number): Promise<ChatMessage[]> {
-  const response = await client.get<ChatMessage[]>(`/api/chats/${chatId}/messages/`);
+export async function getChatMessages(
+  chatId: number,
+  params: MessageHistoryParams = {}
+): Promise<ChatHistoryResponse> {
+  const response = await client.get<ChatHistoryResponse>(
+    `/api/chats/${chatId}/messages/history/`,
+    {
+      params,
+    }
+  );
+  return response.data;
+}
+
+export async function searchChatMessages(
+  chatId: number,
+  query: string
+): Promise<ChatSearchResponse> {
+  const response = await client.get<ChatSearchResponse>(
+    `/api/chats/${chatId}/messages/search/`,
+    {
+      params: { q: query },
+    }
+  );
+  return response.data;
+}
+
+export async function getChatMessageContext(
+  chatId: number,
+  messageId: number,
+  window = 20
+): Promise<ChatHistoryContextResponse> {
+  const response = await client.get<ChatHistoryContextResponse>(
+    `/api/chats/${chatId}/messages/${messageId}/context/`,
+    {
+      params: { window },
+    }
+  );
   return response.data;
 }
 

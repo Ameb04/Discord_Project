@@ -1,11 +1,27 @@
-import { MessageCircle } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowDown,
+  Clock3,
+  Loader2,
+  MessageCircle,
+  Search,
+  SearchX,
+} from "lucide-react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
+import { getChatMessageContext, getChatMessages, searchChatMessages } from "../api/chats";
 import MessageComposer from "../components/chat/MessageComposer";
 import MessageList from "../components/chat/MessageList";
 import { Skeleton } from "../components/ui/skeleton";
+import { Input } from "../components/ui/input";
+import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
-import { getChatMessages } from "../api/chats";
-import type { ChatMessage } from "../types/chat";
+import type { ChatMessage, ChatSearchResult } from "../types/chat";
 
 type ChatPageProps = {
   chatId: number;
@@ -35,13 +51,42 @@ function extractChatError(error: unknown) {
   return "Unable to load this chat right now.";
 }
 
+function formatSentAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function displayName(result: ChatSearchResult) {
+  if (!result.sender) return "Unknown user";
+  const fullName = `${result.sender.first_name} ${result.sender.last_name}`.trim();
+  return fullName || result.sender.phone_number;
+}
+
 function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
   const { user } = useAuth();
+  const messageRefs = useRef<Record<number, HTMLLIElement | null>>({});
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [error, setError] = useState("");
 
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [searchResults, setSearchResults] = useState<ChatSearchResult[]>([]);
+  const [searchedQuery, setSearchedQuery] = useState("");
+  const [highlightMessageId, setHighlightMessageId] = useState<number | null>(null);
+
   const fallbackTitle = useMemo(() => `Chat #${chatId}`, [chatId]);
+  const trimmedSearchQuery = searchQuery.trim();
 
   useEffect(() => {
     let isCurrent = true;
@@ -49,13 +94,21 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
     async function loadMessages() {
       setIsLoading(true);
       setError("");
+      setSearchError("");
+      setSearchResults([]);
+      setSearchedQuery("");
+      setHighlightMessageId(null);
 
       try {
-        const nextMessages = await getChatMessages(chatId);
-        if (isCurrent) setMessages(nextMessages);
+        const history = await getChatMessages(chatId);
+        if (isCurrent) {
+          setMessages(history.results);
+          setHasOlderMessages(history.has_older);
+        }
       } catch (err) {
         if (isCurrent) {
           setMessages([]);
+          setHasOlderMessages(false);
           setError(extractChatError(err));
         }
       } finally {
@@ -70,6 +123,14 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
     };
   }, [chatId]);
 
+  useEffect(() => {
+    if (highlightMessageId == null) return;
+    const node = messageRefs.current[highlightMessageId];
+    if (node) {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [highlightMessageId, messages]);
+
   function handleMessageSent(message: ChatMessage) {
     setMessages((currentMessages) => {
       if (currentMessages.some((currentMessage) => currentMessage.id === message.id)) {
@@ -77,7 +138,87 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
       }
       return [...currentMessages, message];
     });
+    setHighlightMessageId(message.id);
   }
+
+  async function handleLoadOlder() {
+    if (isLoadingOlder || !hasOlderMessages || messages.length === 0) return;
+
+    setIsLoadingOlder(true);
+    setError("");
+
+    try {
+      const oldestMessageId = messages[0]?.id;
+      if (!oldestMessageId) return;
+
+      const history = await getChatMessages(chatId, {
+        before: oldestMessageId,
+      });
+
+      if (history.results.length > 0) {
+        setMessages((currentMessages) => {
+          const existingIds = new Set(currentMessages.map((message) => message.id));
+          const olderMessages = history.results.filter(
+            (message) => !existingIds.has(message.id)
+          );
+          return [...olderMessages, ...currentMessages];
+        });
+      }
+      setHasOlderMessages(history.has_older);
+    } catch (err) {
+      setError(extractChatError(err));
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  }
+
+  async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!trimmedSearchQuery || isSearching) return;
+
+    setIsSearching(true);
+    setSearchError("");
+    setSearchedQuery(trimmedSearchQuery);
+
+    try {
+      const response = await searchChatMessages(chatId, trimmedSearchQuery);
+      setSearchResults(response.results);
+      if (response.results.length === 0) {
+        setHighlightMessageId(null);
+      }
+    } catch (err) {
+      setSearchResults([]);
+      setSearchError(extractChatError(err));
+    } finally {
+      setIsSearching(false);
+    }
+  }
+
+  async function handleOpenSearchResult(messageId: number) {
+    setError("");
+    setSearchError("");
+
+    try {
+      const context = await getChatMessageContext(chatId, messageId);
+      setMessages(context.results);
+      setHasOlderMessages(context.has_older);
+      setHighlightMessageId(context.focus_message_id);
+    } catch (err) {
+      setError(extractChatError(err));
+    }
+  }
+
+  function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setSearchQuery("");
+      setSearchResults([]);
+      setSearchedQuery("");
+      setSearchError("");
+    }
+  }
+
+  const emptySearchState = searchedQuery && !isSearching && searchResults.length === 0 && !searchError;
+  const emptyHistory = !isLoading && !error && messages.length === 0;
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card/50 shadow-2xl shadow-black/30 backdrop-blur-sm">
@@ -101,41 +242,176 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
-        {isLoading ? (
-          <div className="grid gap-4" aria-label="Loading messages">
-            <Skeleton className="h-20 w-3/4" />
-            <Skeleton className="ml-auto h-24 w-2/3" />
-            <Skeleton className="h-16 w-1/2" />
-          </div>
-        ) : null}
-
-        {!isLoading && error ? (
-          <div
-            role="alert"
-            className="rounded-2xl border border-destructive/25 bg-destructive/10 px-5 py-4 text-sm text-red-100"
-          >
-            {error}
-          </div>
-        ) : null}
-
-        {!isLoading && !error && messages.length === 0 ? (
-          <div className="grid min-h-80 place-items-center rounded-2xl border border-dashed border-border bg-white/[0.02] px-6 text-center">
-            <div>
-              <span className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
-                <MessageCircle className="size-6" aria-hidden="true" />
-              </span>
-              <p className="font-medium text-foreground">No messages yet</p>
-              <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
-                Messages for this conversation will appear here once the chat starts.
-              </p>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="border-b border-border px-5 py-4 sm:px-6">
+          <form className="flex flex-col gap-3 md:flex-row" onSubmit={handleSearchSubmit}>
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Search messages in this chat"
+                disabled={isLoading || Boolean(error) || isSearching}
+                className="h-11 pl-10"
+              />
             </div>
-          </div>
-        ) : null}
+            <Button type="submit" disabled={isLoading || Boolean(error) || isSearching || !trimmedSearchQuery}>
+              {isSearching ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Searching...
+                </>
+              ) : (
+                "Search"
+              )}
+            </Button>
+          </form>
 
-        {!isLoading && !error && messages.length > 0 ? (
-          <MessageList messages={messages} currentUser={user} />
-        ) : null}
+          {searchError ? (
+            <div
+              role="alert"
+              className="mt-3 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-red-100"
+            >
+              {searchError}
+            </div>
+          ) : null}
+
+          {!searchError && searchedQuery ? (
+            <div className="mt-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Search results</p>
+                  <p className="text-xs text-muted-foreground">
+                    {isSearching
+                      ? "Looking for matching messages..."
+                      : `${searchResults.length} result${searchResults.length === 1 ? "" : "s"} for "${searchedQuery}"`}
+                  </p>
+                </div>
+                {searchResults.length > 0 ? (
+                  <span className="text-xs text-muted-foreground">
+                    Click a result to jump there
+                  </span>
+                ) : null}
+              </div>
+
+              {isSearching ? (
+                <div className="grid gap-2">
+                  <Skeleton className="h-20 w-full rounded-2xl" />
+                  <Skeleton className="h-20 w-full rounded-2xl" />
+                </div>
+              ) : emptySearchState ? (
+                <div className="flex items-center gap-3 rounded-2xl border border-dashed border-border bg-white/[0.02] px-4 py-5">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary">
+                    <SearchX className="size-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground">No messages matched</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Try another keyword or phrase from this conversation.
+                    </p>
+                  </div>
+                </div>
+              ) : searchResults.length > 0 ? (
+                <ul className="grid gap-2">
+                  {searchResults.map((result) => {
+                    const senderName = displayName(result);
+                    return (
+                      <li key={result.id}>
+                        <button
+                          type="button"
+                          onClick={() => void handleOpenSearchResult(result.id)}
+                          className="w-full rounded-2xl border border-border bg-white/[0.03] px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/10"
+                        >
+                          <div className="flex flex-wrap items-baseline justify-between gap-2">
+                            <p className="truncate font-medium text-foreground">{senderName}</p>
+                            <time className="text-xs text-muted-foreground" dateTime={result.sent_at}>
+                              {formatSentAt(result.sent_at)}
+                            </time>
+                          </div>
+                          <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+                            {result.preview}
+                          </p>
+                          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground/70">
+                            <Clock3 className="size-3.5" />
+                            <span>Message #{result.id}</span>
+                            {result.is_edited ? <span>· edited</span> : null}
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="px-5 py-5 sm:px-6">
+          {isLoading ? (
+            <div className="grid gap-4" aria-label="Loading messages">
+              <Skeleton className="h-20 w-3/4" />
+              <Skeleton className="ml-auto h-24 w-2/3" />
+              <Skeleton className="h-16 w-1/2" />
+            </div>
+          ) : null}
+
+          {!isLoading && error ? (
+            <div
+              role="alert"
+              className="rounded-2xl border border-destructive/25 bg-destructive/10 px-5 py-4 text-sm text-red-100"
+            >
+              {error}
+            </div>
+          ) : null}
+
+          {!isLoading && !error && hasOlderMessages ? (
+            <div className="mb-5 flex justify-center">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isLoadingOlder}
+                onClick={() => void handleLoadOlder()}
+              >
+                {isLoadingOlder ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Loading older...
+                  </>
+                ) : (
+                  <>
+                    <ArrowDown className="size-4" />
+                    Load older messages
+                  </>
+                )}
+              </Button>
+            </div>
+          ) : null}
+
+          {!isLoading && !error && emptyHistory ? (
+            <div className="grid min-h-80 place-items-center rounded-2xl border border-dashed border-border bg-white/[0.02] px-6 text-center">
+              <div>
+                <span className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
+                  <MessageCircle className="size-6" aria-hidden="true" />
+                </span>
+                <p className="font-medium text-foreground">No messages yet</p>
+                <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
+                  Messages for this conversation will appear here once the chat starts.
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          {!isLoading && !error && messages.length > 0 ? (
+            <MessageList
+              messages={messages}
+              currentUser={user}
+              highlightMessageId={highlightMessageId}
+              messageRefs={messageRefs}
+            />
+          ) : null}
+        </div>
       </div>
 
       {error ? null : (

@@ -38,5 +38,34 @@ export type ChatMessage = {
   sender: PublicUser | null;
   content: string;
   sent_at: string;
+  is_edited?: boolean;
   attachment: AttachmentMetadata | null;
+};
+
+export type ChatHistoryResponse = {
+  results: ChatMessage[];
+  count: number;
+  has_older: boolean;
+  has_newer: boolean;
+  oldest_message_id: number | null;
+  newest_message_id: number | null;
+};
+
+export type ChatHistoryContextResponse = ChatHistoryResponse & {
+  focus_message_id: number;
+};
+
+export type ChatSearchResult = {
+  id: number;
+  chat: number;
+  sender: PublicUser | null;
+  preview: string;
+  sent_at: string;
+  is_edited?: boolean;
+};
+
+export type ChatSearchResponse = {
+  query: string;
+  count: number;
+  results: ChatSearchResult[];
 };

@@ -1,10 +1,24 @@
 from django.urls import path
 
-from .views import AttachmentDownloadView, MediaMessageCreateView, MessageListCreateView
+from .views import (
+    AttachmentDownloadView,
+    MediaMessageCreateView,
+    MessageContextView,
+    MessageHistoryView,
+    MessageListCreateView,
+    MessageSearchView,
+)
 
 app_name = "messaging"
 
 chat_message_patterns = [
+    path("history/", MessageHistoryView.as_view(), name="message-history"),
+    path("search/", MessageSearchView.as_view(), name="message-search"),
+    path(
+        "<int:message_id>/context/",
+        MessageContextView.as_view(),
+        name="message-context",
+    ),
     path("media/", MediaMessageCreateView.as_view(), name="media-message"),
     path("", MessageListCreateView.as_view(), name="message-list"),
 ]
