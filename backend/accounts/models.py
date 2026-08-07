@@ -6,6 +6,11 @@ from django.contrib.auth.models import (
 from django.db import models
 
 
+# Bios are a one-line self description, not a profile page. The same ceiling
+# applies to groups, so the two read consistently wherever they sit together.
+BIO_MAX_LENGTH = 70
+
+
 class Gender(models.TextChoices):
     MALE = "male", "Male"
     FEMALE = "female", "Female"
@@ -44,6 +49,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     first_name = models.CharField(max_length=150, blank=True)
     last_name = models.CharField(max_length=150, blank=True)
     gender = models.CharField(max_length=10, choices=Gender.choices, blank=True)
+    bio = models.CharField(max_length=BIO_MAX_LENGTH, blank=True)
     can_be_added_to_group = models.BooleanField(default=True)
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
     tag = models.ForeignKey(
