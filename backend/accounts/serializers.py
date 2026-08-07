@@ -2,10 +2,22 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
-from core.models import Tag
+from core.models import Tag, TagScope
 from core.serializers import TagSerializer
 
 from .models import User
+
+
+def user_tag_field(**kwargs):
+    """A tag field that only accepts tags meant for people.
+
+    Scoping the queryset rather than validating afterwards means a group tag
+    is rejected as "does not exist", which is also the honest answer: it is
+    not a choice this field offers.
+    """
+    return serializers.PrimaryKeyRelatedField(
+        queryset=Tag.objects.filter(scope=TagScope.USER), **kwargs
+    )
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -15,7 +27,15 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("phone_number", "password", "first_name", "last_name", "gender")
+        fields = (
+            "phone_number",
+            "password",
+            "first_name",
+            "last_name",
+            "gender",
+            "bio",
+        )
+        extra_kwargs = {"bio": {"required": False, "allow_blank": True}}
 
     def create(self, validated_data):
         return User.objects.create_user(**validated_data)
@@ -75,9 +95,7 @@ class UserSerializer(serializers.ModelSerializer):
     """Full representation of the current user (private profile, 4.10)."""
 
     avatar_url = serializers.SerializerMethodField()
-    tag = serializers.PrimaryKeyRelatedField(
-        queryset=Tag.objects.all(), required=False, allow_null=True
-    )
+    tag = user_tag_field(required=False, allow_null=True)
 
     class Meta:
         model = User
@@ -86,13 +104,17 @@ class UserSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
             "gender",
+            "bio",
             "can_be_added_to_group",
             "avatar",
             "avatar_url",
             "tag",
         )
         read_only_fields = ("phone_number",)
-        extra_kwargs = {"avatar": {"write_only": True, "required": False}}
+        extra_kwargs = {
+            "avatar": {"write_only": True, "required": False},
+            "bio": {"required": False, "allow_blank": True},
+        }
 
     def get_avatar_url(self, obj):
         if not obj.avatar:
@@ -113,6 +135,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
             "gender",
+            "bio",
             "avatar_url",
             "tag",
         )

@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.db import models
 
+from accounts.models import BIO_MAX_LENGTH
+
 
 class AccessLevel(models.TextChoices):
     PUBLIC = "public", "Public"
@@ -119,8 +121,18 @@ class Group(Chat):
         primary_key=True,
         related_name="group",
     )
-    bio = models.TextField(blank=True)
-    link = models.CharField(max_length=255, blank=True)
+    bio = models.CharField(max_length=BIO_MAX_LENGTH, blank=True)
+    link = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Opaque invite token; anyone who opens it joins the group.",
+    )
+    avatar = models.ImageField(upload_to="groups/", blank=True, null=True)
+    # Media is off until the owner opts in, so a new group cannot be flooded
+    # with uploads before anyone has decided that is wanted.
+    allow_media = models.BooleanField(default=False)
     access_level = models.CharField(
         max_length=10, choices=AccessLevel.choices, default=AccessLevel.PRIVATE
     )
@@ -156,6 +168,7 @@ class ChannelMembership(models.Model):
 class GroupMembership(models.Model):
     group = models.ForeignKey(Group, on_delete=models.CASCADE)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    joined_at = models.DateTimeField(auto_now_add=True, null=True)
 
     class Meta:
         db_table = "group_memberships"
