@@ -1,17 +1,34 @@
 from django.db import models
 
 
+class TagScope(models.TextChoices):
+    """Who a tag may be attached to.
+
+    A tag belongs to exactly one audience: labels meant for people are not
+    offered when naming a group, and vice versa.
+    """
+
+    USER = "user", "People"
+    GROUP = "group", "Groups & channels"
+
+
 class Tag(models.Model):
     """A label that can be attached to users, chats and channels."""
 
     title = models.CharField(max_length=255)
-    for_humans = models.BooleanField(default=True)
+    scope = models.CharField(
+        max_length=10,
+        choices=TagScope.choices,
+        default=TagScope.USER,
+        help_text="Whether this tag is offered for people or for groups/channels.",
+    )
 
     class Meta:
         db_table = "tags"
+        ordering = ("scope", "title")
 
     def __str__(self):
-        return self.title
+        return f"{self.title} ({self.get_scope_display()})"
 
 
 class File(models.Model):
