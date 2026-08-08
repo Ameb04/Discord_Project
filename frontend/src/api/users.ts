@@ -1,5 +1,5 @@
 import client from "./client";
-import type { PublicUser, Tag, User } from "../types/user";
+import type { PublicUser, Tag, TagScope, User } from "../types/user";
 
 export async function getMe() {
   const response = await client.get<User>("/api/auth/me/");
@@ -23,8 +23,9 @@ export async function getUserProfile(phoneNumber: string): Promise<PublicUser> {
   return response.data;
 }
 
-export async function getTags(): Promise<Tag[]> {
-  const response = await client.get<Tag[]>("/api/tags/");
+/** Tags offered for one audience — people by default, or groups and channels. */
+export async function getTags(scope: TagScope = "user"): Promise<Tag[]> {
+  const response = await client.get<Tag[]>("/api/tags/", { params: { scope } });
   return response.data;
 }
 

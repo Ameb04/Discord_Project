@@ -1,4 +1,4 @@
-import { ChevronRight, MessageCircle, Users } from "lucide-react";
+import { ChevronRight, MessageCircle, Plus, Users } from "lucide-react";
 import { motion } from "motion/react";
 import { Link } from "react-router-dom";
 
@@ -27,6 +27,7 @@ type ConversationSidebarProps = {
   selectedChatId: number | null;
   isLoading?: boolean;
   error?: string;
+  onCreateGroup: () => void;
 };
 
 /** Row shell shared by direct chats and groups. */
@@ -63,6 +64,7 @@ function ConversationSidebar({
   selectedChatId,
   isLoading = false,
   error,
+  onCreateGroup,
 }: ConversationSidebarProps) {
   const tabs = [
     {
@@ -82,13 +84,26 @@ function ConversationSidebar({
 
   return (
     <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card/50 shadow-2xl shadow-black/30 backdrop-blur-sm">
-      <div className="shrink-0 border-b border-border px-4 py-4 sm:px-5">
-        <p className="text-xs font-medium tracking-[0.2em] text-primary/80 uppercase">
-          Conversations
-        </p>
-        <h2 className="mt-1.5 text-xl font-semibold tracking-tight text-foreground">
-          Inbox
-        </h2>
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
+        <div className="min-w-0">
+          <p className="text-xs font-medium tracking-[0.2em] text-primary/80 uppercase">
+            Conversations
+          </p>
+          <h2 className="mt-1.5 text-xl font-semibold tracking-tight text-foreground">
+            Inbox
+          </h2>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-9 shrink-0"
+          aria-label="Create a new group"
+          title="New group"
+          onClick={onCreateGroup}
+        >
+          <Plus className="size-4" aria-hidden="true" />
+        </Button>
       </div>
 
       <div className="shrink-0 border-b border-border p-3">
@@ -182,7 +197,18 @@ function ConversationSidebar({
                 <Button asChild variant="outline" size="sm" className="mt-4">
                   <Link to="/search">Search people</Link>
                 </Button>
-              ) : null}
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                  onClick={onCreateGroup}
+                >
+                  <Plus className="size-4" aria-hidden="true" />
+                  New group
+                </Button>
+              )}
             </div>
           </div>
         ) : activeTab === "private" ? (
@@ -241,9 +267,14 @@ function ConversationSidebar({
                       to={`/chats/${group.id}`}
                       isActive={selectedChatId === group.id}
                     >
-                      <div className="bg-brand-gradient grid size-11 shrink-0 place-items-center rounded-2xl text-white">
-                        <Users className="size-5" aria-hidden="true" />
-                      </div>
+                      <Avatar className="size-11 shrink-0 border border-border">
+                        {group.avatar_url ? (
+                          <AvatarImage src={group.avatar_url} alt={group.name} />
+                        ) : null}
+                        <AvatarFallback className="bg-brand-gradient text-white">
+                          <Users className="size-5" aria-hidden="true" />
+                        </AvatarFallback>
+                      </Avatar>
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
