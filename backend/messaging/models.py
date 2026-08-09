@@ -105,3 +105,38 @@ class ScheduledMessage(Message):
                 name="scheduled_msg_due_idx",
             ),
         ]
+
+
+class ChatReadState(models.Model):
+    """How far one user has read in one chat.
+
+    A high-water mark rather than a row per (message, reader): read receipts
+    are monotonic, so one row per participant answers "has this been seen?"
+    for every message at once, instead of growing with messages × members.
+
+    ``last_read_message_id`` is a plain watermark, not a foreign key. It is
+    compared numerically against message ids and must survive a message being
+    purged, which a foreign key would either block or null out.
+    """
+
+    chat = models.ForeignKey(
+        "chats.Chat", on_delete=models.CASCADE, related_name="read_states"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="chat_read_states",
+    )
+    last_read_message_id = models.BigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_read_states"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["chat", "user"], name="uq_chat_read_state"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} read chat {self.chat_id} up to {self.last_read_message_id}"
