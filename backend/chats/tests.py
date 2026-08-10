@@ -17,6 +17,7 @@ from .models import (
     Topic,
 )
 from .permissions import can_access_chat, can_send_media_to_chat, can_send_to_chat
+from .serializers import GROUP_NAME_MAX_LENGTH
 from .services import (
     add_group_member,
     build_direct_chat_key,
@@ -532,6 +533,38 @@ class GroupApiTests(AuthenticatedClientMixin, TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("name", response.data)
+
+    def test_group_name_is_capped(self):
+        client = self.authenticated_client(self.owner)
+
+        at_limit = client.post(
+            "/api/groups/",
+            {"name": "n" * GROUP_NAME_MAX_LENGTH},
+            format="json",
+        )
+        over_limit = client.post(
+            "/api/groups/",
+            {"name": "n" * (GROUP_NAME_MAX_LENGTH + 1)},
+            format="json",
+        )
+
+        self.assertEqual(at_limit.status_code, 201)
+        self.assertEqual(over_limit.status_code, 400)
+        self.assertIn("name", over_limit.data)
+
+    def test_renaming_a_group_past_the_cap_is_rejected(self):
+        group = create_group(self.owner, name="Study group")
+
+        response = self.authenticated_client(self.owner).patch(
+            f"/api/groups/{group.pk}/",
+            {"name": "n" * (GROUP_NAME_MAX_LENGTH + 1)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("name", response.data)
+        group.refresh_from_db()
+        self.assertEqual(group.name, "Study group")
 
     def test_members_can_read_the_group_profile(self):
         group = create_group(self.owner, name="Study group")
