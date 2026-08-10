@@ -50,7 +50,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     last_name = models.CharField(max_length=150, blank=True)
     gender = models.CharField(max_length=10, choices=Gender.choices, blank=True)
     bio = models.CharField(max_length=BIO_MAX_LENGTH, blank=True)
+    # Two switches rather than one: a channel is a bigger, more public room
+    # than a group, and plenty of people are happy to be pulled into a friend's
+    # group chat but not into a stranger's channel.
     can_be_added_to_group = models.BooleanField(default=True)
+    can_be_added_to_channel = models.BooleanField(default=True)
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
     tag = models.ForeignKey(
         "core.Tag",

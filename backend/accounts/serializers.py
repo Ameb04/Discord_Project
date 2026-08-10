@@ -106,6 +106,7 @@ class UserSerializer(serializers.ModelSerializer):
             "gender",
             "bio",
             "can_be_added_to_group",
+            "can_be_added_to_channel",
             "avatar",
             "avatar_url",
             "tag",

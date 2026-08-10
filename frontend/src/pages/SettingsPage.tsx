@@ -82,6 +82,7 @@ function SettingsPage() {
   const [gender, setGender] = useState<Gender>("male");
   const [bio, setBio] = useState("");
   const [canBeAdded, setCanBeAdded] = useState(true);
+  const [canBeAddedToChannel, setCanBeAddedToChannel] = useState(true);
   const [selectedTagId, setSelectedTagId] = useState<number | "">("");
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
@@ -111,6 +112,7 @@ function SettingsPage() {
         setGender(profile.gender ?? "male");
         setBio(profile.bio ?? "");
         setCanBeAdded(profile.can_be_added_to_group ?? true);
+        setCanBeAddedToChannel(profile.can_be_added_to_channel ?? true);
         setSelectedTagId(
           typeof profile.tag === "object" && profile.tag
             ? profile.tag.id
@@ -157,6 +159,7 @@ function SettingsPage() {
         formData.append("gender", gender);
         formData.append("bio", bio);
         formData.append("can_be_added_to_group", String(canBeAdded));
+        formData.append("can_be_added_to_channel", String(canBeAddedToChannel));
         formData.append("tag", tagValue === null ? "" : String(tagValue));
         formData.append("avatar", avatarFile);
         updated = await updateMeWithAvatar(formData);
@@ -167,6 +170,7 @@ function SettingsPage() {
           gender,
           bio,
           can_be_added_to_group: canBeAdded,
+          can_be_added_to_channel: canBeAddedToChannel,
           tag: tagValue,
         });
       }
@@ -395,13 +399,38 @@ function SettingsPage() {
 
             <BioField value={bio} onChange={setBio} disabled={isSaving} />
 
-            <label className="flex items-center gap-3 text-sm text-foreground/80">
-              <Checkbox
-                checked={canBeAdded}
-                onCheckedChange={(checked) => setCanBeAdded(checked === true)}
-              />
-              Allow adding me to groups
-            </label>
+            {/* Two switches rather than one: a channel is a bigger, more
+                public room than a group, and being happy to be pulled into a
+                friend's group chat says nothing about a stranger's channel.
+                Neither affects invite links — opening one is your own choice. */}
+            <fieldset className="grid gap-3 rounded-2xl border border-border bg-white/[0.02] p-4">
+              <legend className="px-1 text-xs font-medium tracking-[0.14em] text-primary/80 uppercase">
+                Who can add you
+              </legend>
+
+              <label className="flex items-center gap-3 text-sm text-foreground/80">
+                <Checkbox
+                  checked={canBeAdded}
+                  onCheckedChange={(checked) => setCanBeAdded(checked === true)}
+                />
+                Allow people to add me to groups
+              </label>
+
+              <label className="flex items-center gap-3 text-sm text-foreground/80">
+                <Checkbox
+                  checked={canBeAddedToChannel}
+                  onCheckedChange={(checked) =>
+                    setCanBeAddedToChannel(checked === true)
+                  }
+                />
+                Allow admins to add me to channels
+              </label>
+
+              <p className="text-xs text-muted-foreground">
+                Turning these off does not block invite links — you can still
+                join anything you open yourself.
+              </p>
+            </fieldset>
 
             <div className="flex flex-wrap items-center gap-3 pt-1">
               <Button type="button" disabled={isSaving} onClick={handleSave}>
