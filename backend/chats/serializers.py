@@ -8,6 +8,17 @@ from core.serializers import TagSerializer
 from .models import AccessLevel, Group
 
 
+# A group name is read in a sidebar row, a chat header and a dialog title. The
+# column holds 255, but a name that long is an ellipsis everywhere it appears,
+# so the API caps what it will accept. Mirrored by
+# `frontend/src/lib/profile.ts:GROUP_NAME_MAX_LENGTH`.
+GROUP_NAME_MAX_LENGTH = 30
+
+
+def group_name_field(**kwargs):
+    return serializers.CharField(max_length=GROUP_NAME_MAX_LENGTH, **kwargs)
+
+
 def group_tag_field(**kwargs):
     """A tag field that only accepts tags meant for groups and channels."""
     return serializers.PrimaryKeyRelatedField(
@@ -136,7 +147,7 @@ class GroupDetailSerializer(GroupSummarySerializer):
 
 
 class GroupCreateSerializer(serializers.Serializer):
-    name = serializers.CharField(max_length=255)
+    name = group_name_field()
     bio = group_bio_field(required=False, default="")
     tag = group_tag_field(required=False, allow_null=True)
     avatar = serializers.ImageField(required=False, allow_null=True)
@@ -148,7 +159,7 @@ class GroupCreateSerializer(serializers.Serializer):
 class GroupUpdateSerializer(serializers.Serializer):
     """Owner-only profile edit. Every field is optional and partial."""
 
-    name = serializers.CharField(max_length=255, required=False)
+    name = group_name_field(required=False)
     bio = group_bio_field(required=False)
     tag = group_tag_field(required=False, allow_null=True)
     avatar = serializers.ImageField(required=False, allow_null=True)
