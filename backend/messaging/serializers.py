@@ -23,6 +23,12 @@ class MessageUpdateSerializer(serializers.Serializer):
     remove_file = serializers.BooleanField(required=False, default=False)
 
 
+class MarkReadSerializer(serializers.Serializer):
+    """Advance the caller's read watermark; omitting the id means "all of it"."""
+
+    message_id = serializers.IntegerField(required=False, min_value=1)
+
+
 class MediaMessageCreateSerializer(serializers.Serializer):
     file = serializers.FileField()
     content = serializers.CharField(

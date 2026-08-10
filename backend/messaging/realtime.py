@@ -21,6 +21,27 @@ def broadcast_message_after_commit(message):
     transaction.on_commit(lambda: _broadcast_message(message_id), robust=True)
 
 
+def broadcast_message_deleted_after_commit(message):
+    """Announce a deletion after commit so listeners can drop the message.
+
+    Unlike a create, the row is gone from the readable set by then, so the ids
+    are captured up front rather than re-read at broadcast time.
+    """
+    message_id = message.pk
+    chat_id = message.chat_id
+    transaction.on_commit(
+        lambda: _broadcast_message_deleted(chat_id, message_id), robust=True
+    )
+
+
+def broadcast_read_state_after_commit(chat_id, reader_id, last_read_message_id):
+    """Tell the chat that one participant's read watermark moved."""
+    transaction.on_commit(
+        lambda: _broadcast_read_state(chat_id, reader_id, last_read_message_id),
+        robust=True,
+    )
+
+
 def _broadcast_message(message_id):
     try:
         message = NormalMessage.objects.select_related(
@@ -38,5 +59,36 @@ def _broadcast_message(message_id):
         {
             "type": "chat.message",
             "message": NormalMessageSerializer(message).data,
+        },
+    )
+
+
+def _broadcast_message_deleted(chat_id, message_id):
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return
+
+    async_to_sync(channel_layer.group_send)(
+        chat_group_name(chat_id),
+        {
+            "type": "chat.message_deleted",
+            "chat_id": chat_id,
+            "message_id": message_id,
+        },
+    )
+
+
+def _broadcast_read_state(chat_id, reader_id, last_read_message_id):
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return
+
+    async_to_sync(channel_layer.group_send)(
+        chat_group_name(chat_id),
+        {
+            "type": "chat.read",
+            "chat_id": chat_id,
+            "reader_id": str(reader_id),
+            "last_read_message_id": last_read_message_id,
         },
     )

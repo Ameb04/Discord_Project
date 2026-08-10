@@ -8,11 +8,26 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.text import get_valid_filename
 
-from chats.permissions import can_send_to_chat
+from chats.permissions import (
+    can_access_chat,
+    can_delete_message,
+    can_send_media_to_chat,
+    can_send_to_chat,
+    chat_member_ids,
+)
 from core.models import File
 
-from .models import NormalMessage, ScheduledMessage, ScheduledMessageStatus
-from .realtime import broadcast_message_after_commit
+from .models import (
+    ChatReadState,
+    NormalMessage,
+    ScheduledMessage,
+    ScheduledMessageStatus,
+)
+from .realtime import (
+    broadcast_message_after_commit,
+    broadcast_message_deleted_after_commit,
+    broadcast_read_state_after_commit,
+)
 from .scheduling import enqueue_delivery_on_commit
 
 
@@ -150,6 +165,8 @@ def create_media_message(sender, chat, uploaded_file, content=""):
         raise ValidationError({"chat": "Chat is required."})
     if not can_send_to_chat(sender, chat):
         raise PermissionDenied("You do not have permission to send to this chat.")
+    if not can_send_media_to_chat(sender, chat):
+        raise PermissionDenied("Media is not enabled in this chat.")
 
     _validate_uploaded_file(uploaded_file)
     normalized_content = _validate_optional_content(content)
@@ -205,6 +222,11 @@ def edit_message(sender, chat, message_id, content=None, uploaded_file=None, rem
     detaches_file = message.file_id is not None and (remove_file or attaches_file)
     will_have_file = attaches_file or (message.file_id is not None and not remove_file)
 
+    # Only a *new* attachment is gated. Keeping one that predates the switch
+    # being turned off is not an upload, and removing it is always allowed.
+    if attaches_file and not can_send_media_to_chat(sender, chat):
+        raise PermissionDenied("Media is not enabled in this chat.")
+
     if not new_content and not will_have_file:
         raise ValidationError({"content": "Message must have content or an attachment."})
 
@@ -254,6 +276,119 @@ def edit_message(sender, chat, message_id, content=None, uploaded_file=None, rem
         raise
 
     return message
+
+
+def delete_message(actor, chat, message_id):
+    """Soft-delete a message and tell the chat's listeners it is gone.
+
+    The author may delete their own message anywhere; a group owner may also
+    delete anyone's message in their group. Deletion is a moderation power,
+    so it deliberately does *not* come with the right to edit.
+
+    Any attachment is dropped from storage with the message — a soft-deleted
+    row is unreachable through every read path, so keeping the bytes would
+    only leave an orphan nobody can reach.
+    """
+    _validate_sender(actor)
+
+    try:
+        message = NormalMessage.objects.select_related("chat", "file").get(
+            pk=message_id, chat=chat, is_deleted=False
+        )
+    except NormalMessage.DoesNotExist:
+        raise ValidationError({"message": "Message not found."})
+
+    if not can_delete_message(actor, message):
+        raise PermissionDenied("You do not have permission to delete this message.")
+
+    attached_file = message.file
+    storage_path = attached_file.storage_path if attached_file else ""
+
+    with transaction.atomic():
+        message.is_deleted = True
+        message.file = None
+        message.save(update_fields=["is_deleted", "file"])
+
+        if attached_file is not None:
+            attached_file.delete()
+
+        broadcast_message_deleted_after_commit(message)
+
+    # Outside the transaction: a rolled-back delete must not have already
+    # destroyed the bytes it was meant to keep.
+    if storage_path:
+        get_private_storage().delete(storage_path)
+
+    return message
+
+
+def mark_chat_read(reader, chat, message_id=None):
+    """Advance ``reader``'s read watermark in ``chat``.
+
+    Passing no ``message_id`` marks everything currently visible as read. The
+    watermark only ever moves forward, so an out-of-order request — a stale tab
+    reporting an old message — cannot un-read anything.
+
+    Returns the resulting watermark.
+    """
+    _validate_sender(reader)
+    if chat is None:
+        raise ValidationError({"chat": "Chat is required."})
+    if not can_access_chat(reader, chat):
+        raise PermissionDenied("You do not have permission to access this chat.")
+
+    if message_id is None:
+        target_id = (
+            NormalMessage.objects.filter(chat=chat, is_deleted=False)
+            .order_by("-pk")
+            .values_list("pk", flat=True)
+            .first()
+        ) or 0
+    else:
+        if not NormalMessage.objects.filter(
+            pk=message_id, chat=chat, is_deleted=False
+        ).exists():
+            raise ValidationError({"message_id": "Message not found in this chat."})
+        target_id = message_id
+
+    with transaction.atomic():
+        read_state, _ = ChatReadState.objects.select_for_update().get_or_create(
+            chat=chat, user=reader, defaults={"last_read_message_id": target_id}
+        )
+
+        if read_state.last_read_message_id >= target_id:
+            return read_state.last_read_message_id
+
+        read_state.last_read_message_id = target_id
+        read_state.save(update_fields=("last_read_message_id", "updated_at"))
+        broadcast_read_state_after_commit(chat.pk, reader.pk, target_id)
+
+    return target_id
+
+
+def get_chat_read_state(viewer, chat):
+    """Return how far everyone *else* in ``chat`` has read.
+
+    The viewer's own watermark is left out: receipts answer "who has seen what
+    I sent", and a sender reading their own message says nothing.
+    """
+    _validate_sender(viewer)
+    if not can_access_chat(viewer, chat):
+        raise PermissionDenied("You do not have permission to access this chat.")
+
+    other_ids = [pk for pk in chat_member_ids(chat) if pk != viewer.pk]
+    stored = dict(
+        ChatReadState.objects.filter(chat=chat, user_id__in=other_ids).values_list(
+            "user_id", "last_read_message_id"
+        )
+    )
+
+    return {
+        "other_member_count": len(other_ids),
+        # Members who have never opened the chat count as having read nothing,
+        # so the client can tell "not seen yet" from "not a member".
+        "watermarks": {str(pk): stored.get(pk, 0) for pk in other_ids},
+    }
 
 
 def _validate_sender(sender):
