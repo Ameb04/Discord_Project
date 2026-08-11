@@ -7,12 +7,12 @@ import { Dialog } from "@/components/ui/dialog";
 import { apiErrorMessage } from "@/lib/apiError";
 import type { GroupDetail } from "@/types/chat";
 
-import { GroupProfileFields } from "./GroupProfileFields";
+import { RoomProfileFields } from "@/components/room/RoomProfileFields";
 import {
   draftToProfileInput,
-  emptyGroupProfileDraft,
-  type GroupProfileDraft,
-} from "./groupProfile";
+  emptyRoomProfileDraft,
+  type RoomProfileDraft,
+} from "@/components/room/roomProfile";
 
 type CreateGroupDialogProps = {
   open: boolean;
@@ -29,7 +29,9 @@ type CreateGroupDialogProps = {
  * members and the media switch are handled from the group's own panel.
  */
 function CreateGroupDialog({ open, onClose, onCreated }: CreateGroupDialogProps) {
-  const [draft, setDraft] = useState<GroupProfileDraft>(emptyGroupProfileDraft);
+  const [draft, setDraft] = useState<RoomProfileDraft>(() =>
+    emptyRoomProfileDraft()
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   // Reopening should start from a blank form, not the last abandoned draft.
@@ -38,7 +40,7 @@ function CreateGroupDialog({ open, onClose, onCreated }: CreateGroupDialogProps)
   if (wasOpen !== open) {
     setWasOpen(open);
     if (open) {
-      setDraft(emptyGroupProfileDraft());
+      setDraft(emptyRoomProfileDraft());
       setError("");
     }
   }
@@ -100,10 +102,14 @@ function CreateGroupDialog({ open, onClose, onCreated }: CreateGroupDialogProps)
       }
     >
       <div className="grid gap-4">
-        <GroupProfileFields
+        <RoomProfileFields
           value={draft}
           onChange={setDraft}
           disabled={isSaving}
+          nameLabel="Group name"
+          namePlaceholder="Weekend hiking crew"
+          bioPlaceholder="What is this group about?"
+          fallbackIcon={<UsersRound className="size-6" aria-hidden="true" />}
         />
 
         {error ? (

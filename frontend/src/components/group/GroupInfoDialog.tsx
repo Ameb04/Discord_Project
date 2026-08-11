@@ -7,6 +7,7 @@ import {
   Link2,
   LoaderCircle,
   Pencil,
+  RefreshCw,
   Trash2,
   UserMinus,
   Users,
@@ -15,10 +16,12 @@ import {
 import { useEffect, useState } from "react";
 
 import {
+  addGroupMember,
   deleteGroup,
   getGroup,
   inviteUrlFor,
   removeGroupMember,
+  resetGroupInvite,
   updateGroup,
 } from "@/api/groups";
 import { AnimatedListItem, AnimatedListPresence } from "@/components/motion/AnimatedList";
@@ -28,18 +31,19 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useCopyFeedback } from "@/hooks/useCopyFeedback";
 import { apiErrorMessage } from "@/lib/apiError";
 import { initialsFor, personDisplayName } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { GroupDetail, GroupMember } from "@/types/chat";
 
-import { GroupMemberAdder } from "./GroupMemberAdder";
-import { GroupProfileFields } from "./GroupProfileFields";
+import { MemberAdder } from "@/components/room/MemberAdder";
+import { RoomProfileFields } from "@/components/room/RoomProfileFields";
 import {
-  draftFromGroup,
+  draftFromRoom,
   draftToProfileInput,
-  type GroupProfileDraft,
-} from "./groupProfile";
+  type RoomProfileDraft,
+} from "@/components/room/roomProfile";
 
 type GroupInfoDialogProps = {
   open: boolean;
@@ -53,19 +57,6 @@ type GroupInfoDialogProps = {
    *  mounted once for the conversation rather than once per member row. */
   onOpenProfile?: (phoneNumber: string) => void;
 };
-
-/** Copy-to-clipboard that reports success for a moment, then resets. */
-function useCopyFeedback(resetAfterMs = 2000) {
-  const [hasCopied, setHasCopied] = useState(false);
-
-  useEffect(() => {
-    if (!hasCopied) return;
-    const timer = setTimeout(() => setHasCopied(false), resetAfterMs);
-    return () => clearTimeout(timer);
-  }, [hasCopied, resetAfterMs]);
-
-  return [hasCopied, setHasCopied] as const;
-}
 
 function MemberRow({
   member,
@@ -161,7 +152,7 @@ function GroupInfoDialog({
   const [loadError, setLoadError] = useState("");
 
   const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState<GroupProfileDraft | null>(null);
+  const [draft, setDraft] = useState<RoomProfileDraft | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
@@ -172,8 +163,9 @@ function GroupInfoDialog({
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [isResettingInvite, setIsResettingInvite] = useState(false);
 
-  const [hasCopied, setHasCopied] = useCopyFeedback();
+  const { hasCopied, copy } = useCopyFeedback();
 
   // Loaded on open rather than taken as a prop, so the member list is always
   // the server's current answer instead of a stale sidebar snapshot.
@@ -216,7 +208,7 @@ function GroupInfoDialog({
 
   function startEditing() {
     if (!group) return;
-    setDraft(draftFromGroup(group));
+    setDraft(draftFromRoom(group));
     setSaveError("");
     setIsEditing(true);
   }
@@ -286,13 +278,18 @@ function GroupInfoDialog({
     }
   }
 
-  async function handleCopyInvite() {
-    if (!group?.invite_link) return;
+  async function handleResetInvite() {
+    if (!group) return;
+
+    setIsResettingInvite(true);
+    setSaveError("");
+
     try {
-      await navigator.clipboard.writeText(inviteUrlFor(group.invite_link));
-      setHasCopied(true);
-    } catch {
-      // Clipboard access can be denied; the link stays selectable on screen.
+      applyGroup(await resetGroupInvite(group.id));
+    } catch (err) {
+      setSaveError(apiErrorMessage(err, "Could not issue a new invite link."));
+    } finally {
+      setIsResettingInvite(false);
     }
   }
 
@@ -330,11 +327,15 @@ function GroupInfoDialog({
           <div className="grid gap-5">
             {isEditing && draft ? (
               <section className="grid gap-4">
-                <GroupProfileFields
+                <RoomProfileFields
                   value={draft}
                   onChange={setDraft}
                   disabled={isSaving}
                   existingAvatarUrl={group.avatar_url}
+                  nameLabel="Group name"
+                  namePlaceholder="Weekend hiking crew"
+                  bioPlaceholder="What is this group about?"
+                  fallbackIcon={<Users className="size-6" aria-hidden="true" />}
                 />
 
                 {saveError ? (
@@ -463,7 +464,7 @@ function GroupInfoDialog({
                     variant="outline"
                     size="sm"
                     className="shrink-0"
-                    onClick={() => void handleCopyInvite()}
+                    onClick={() => void copy(inviteUrlFor(group.invite_link ?? ""))}
                   >
                     {hasCopied ? (
                       <>
@@ -477,9 +478,33 @@ function GroupInfoDialog({
                       </>
                     )}
                   </Button>
+                  {isOwner ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      disabled={isResettingInvite}
+                      title="Revoke this link and issue a new one"
+                      onClick={() => void handleResetInvite()}
+                    >
+                      {isResettingInvite ? (
+                        <LoaderCircle
+                          className="size-4 animate-spin"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <RefreshCw className="size-4" aria-hidden="true" />
+                      )}
+                      New link
+                    </Button>
+                  ) : null}
                 </div>
                 <p className="text-xs text-muted-foreground/70">
                   Anyone who opens this link joins the group.
+                  {isOwner
+                    ? " Generating a new one immediately stops the old link from working."
+                    : null}
                 </p>
               </section>
             ) : null}
@@ -489,7 +514,17 @@ function GroupInfoDialog({
                 <p className="text-xs font-medium tracking-[0.14em] text-primary/80 uppercase">
                   Add members
                 </p>
-                <GroupMemberAdder group={group} onGroupChanged={applyGroup} />
+                <MemberAdder
+                  roomLabel="group"
+                  memberPhones={
+                    new Set(
+                      group.members.map((member) => member.user.phone_number)
+                    )
+                  }
+                  onAdd={async (user) => {
+                    applyGroup(await addGroupMember(group.id, user.phone_number));
+                  }}
+                />
               </section>
             ) : null}
 

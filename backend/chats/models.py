@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models.functions import Lower
 
 from accounts.models import BIO_MAX_LENGTH
 
@@ -31,12 +32,32 @@ class Chat(models.Model):
 
 
 class Channel(models.Model):
-    """A broadcast channel. Not a Chat subclass; topics live inside it."""
+    """A broadcast channel. Not a Chat subclass; topics live inside it.
+
+    A channel holds no messages of its own — it is a container for topics and,
+    more importantly, the single place membership and roles are decided. Every
+    topic inside it inherits that answer, so "who can read this" is asked once
+    per channel rather than once per topic.
+    """
 
     name = models.CharField(max_length=255)
-    bio = models.TextField(blank=True)
-    link = models.CharField(max_length=255, blank=True)
-    is_private = models.BooleanField(default=False)
+    bio = models.CharField(max_length=BIO_MAX_LENGTH, blank=True)
+    link = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Opaque invite token; anyone who opens it joins the channel.",
+    )
+    avatar = models.ImageField(upload_to="channels/", blank=True, null=True)
+    # Public channels are discoverable and self-serve; private ones can only be
+    # entered by invitation or by an admin adding someone.
+    access_level = models.CharField(
+        max_length=10, choices=AccessLevel.choices, default=AccessLevel.PUBLIC
+    )
+    # Off until an admin opts in, matching groups: a brand-new channel cannot be
+    # flooded with uploads before anyone has decided that is wanted.
+    allow_media = models.BooleanField(default=False)
     is_deleted = models.BooleanField(default=False)
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -58,13 +79,28 @@ class Channel(models.Model):
 
     class Meta:
         db_table = "channels"
+        constraints = [
+            # Channel names are how people find a channel in the directory, so
+            # they are an identifier rather than a label. Case-insensitive, and
+            # scoped to live channels so deleting one frees its name again.
+            models.UniqueConstraint(
+                Lower("name"),
+                condition=models.Q(is_deleted=False),
+                name="uq_channel_name_ci",
+            )
+        ]
 
     def __str__(self):
         return self.name
 
 
 class Topic(Chat):
-    """A discussion topic that belongs to a channel."""
+    """A discussion topic that belongs to a channel.
+
+    This — not the channel — is the thing with messages in it. Membership is
+    the channel's business; a topic only decides whether ordinary members may
+    post, or whether it is admin-only for a while.
+    """
 
     chat = models.OneToOneField(
         Chat,
@@ -73,9 +109,15 @@ class Topic(Chat):
         primary_key=True,
         related_name="topic",
     )
+    bio = models.CharField(max_length=BIO_MAX_LENGTH, blank=True)
+    avatar = models.ImageField(upload_to="topics/", blank=True, null=True)
     access_level = models.CharField(
         max_length=10, choices=AccessLevel.choices, default=AccessLevel.PUBLIC
     )
+    # Admins can close a topic to everyone else — announcements during an exam
+    # week, a thread that got out of hand — and reopen it later. Admins are
+    # never blocked by their own switch.
+    allow_member_messages = models.BooleanField(default=True)
     channel = models.ForeignKey(
         Channel, on_delete=models.CASCADE, related_name="topics"
     )
@@ -152,9 +194,16 @@ class Group(Chat):
 
 
 class ChannelMembership(models.Model):
+    """One person's place in a channel, and whether they help run it.
+
+    The owner is enrolled here like everyone else; ownership is the extra role
+    carried by `Channel.owner`, not a different kind of membership.
+    """
+
     channel = models.ForeignKey(Channel, on_delete=models.CASCADE)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     is_admin = models.BooleanField(default=False)
+    joined_at = models.DateTimeField(auto_now_add=True, null=True)
 
     class Meta:
         db_table = "channel_memberships"

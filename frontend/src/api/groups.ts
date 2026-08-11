@@ -1,4 +1,5 @@
 import client from "./client";
+import { encodeProfile } from "./encodeProfile";
 import type {
   GroupAccessLevel,
   GroupConversation,
@@ -20,40 +21,6 @@ export type GroupProfileInput = {
   allow_media?: boolean;
   access_level?: GroupAccessLevel;
 };
-
-/**
- * Encode a profile edit, choosing the wire format from the payload itself.
- *
- * A file forces multipart; everything else goes as JSON, which keeps `null`
- * (clear the tag) and booleans meaningful instead of collapsing to the strings
- * `"null"` and `"false"` that a FormData round-trip would produce.
- */
-function encodeProfile(input: GroupProfileInput) {
-  if (!(input.avatar instanceof File)) {
-    // `avatar: null` would ask the server to clear the picture, which is not
-    // what "no new file chosen" means — so drop the key rather than send it.
-    const data: Record<string, unknown> = { ...input };
-    delete data.avatar;
-    return { data, config: undefined };
-  }
-
-  const formData = new FormData();
-  for (const [key, value] of Object.entries(input)) {
-    if (value === undefined) continue;
-    if (value instanceof File) {
-      formData.append(key, value);
-    } else if (value === null) {
-      formData.append(key, "");
-    } else {
-      formData.append(key, String(value));
-    }
-  }
-
-  return {
-    data: formData,
-    config: { headers: { "Content-Type": "multipart/form-data" } },
-  };
-}
 
 export async function getGroups(): Promise<GroupConversation[]> {
   const response = await client.get<GroupConversation[]>("/api/groups/");
@@ -108,6 +75,14 @@ export async function removeGroupMember(
   await client.delete(
     `/api/groups/${groupId}/members/${encodeURIComponent(phoneNumber)}/`
   );
+}
+
+/** Issue a new invite token, which stops the previous link from working. */
+export async function resetGroupInvite(groupId: number): Promise<GroupDetail> {
+  const response = await client.post<GroupDetail>(
+    `/api/groups/${groupId}/invite/reset/`
+  );
+  return response.data;
 }
 
 export async function getGroupInvite(token: string): Promise<GroupInvitePreview> {

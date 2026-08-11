@@ -5,14 +5,16 @@ from accounts.serializers import PublicUserSerializer
 from core.models import Tag, TagScope
 from core.serializers import TagSerializer
 
-from .models import AccessLevel, Group
+from .models import AccessLevel, Channel, ChannelMembership, Group, Topic
 
 
-# A group name is read in a sidebar row, a chat header and a dialog title. The
+# A room's name is read in a sidebar row, a chat header and a dialog title. The
 # column holds 255, but a name that long is an ellipsis everywhere it appears,
 # so the API caps what it will accept. Mirrored by
-# `frontend/src/lib/profile.ts:GROUP_NAME_MAX_LENGTH`.
+# `frontend/src/lib/profile.ts:ROOM_NAME_MAX_LENGTH`.
 GROUP_NAME_MAX_LENGTH = 30
+CHANNEL_NAME_MAX_LENGTH = 30
+TOPIC_NAME_MAX_LENGTH = 30
 
 
 def group_name_field(**kwargs):
@@ -176,3 +178,261 @@ class GroupUpdateSerializer(serializers.Serializer):
 
 class GroupMemberAddSerializer(serializers.Serializer):
     user = serializers.CharField()
+
+
+# --------------------------------------------------------------------------
+# Channels and topics
+# --------------------------------------------------------------------------
+
+
+class TopicSummarySerializer(serializers.ModelSerializer):
+    """One topic as the channel's topic list and the sidebar know it."""
+
+    type = serializers.SerializerMethodField()
+    tag = TagSerializer(read_only=True)
+    avatar_url = serializers.SerializerMethodField()
+    channel = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = Topic
+        fields = (
+            "id",
+            "type",
+            "name",
+            "bio",
+            "tag",
+            "avatar_url",
+            "channel",
+            "access_level",
+            "allow_member_messages",
+        )
+
+    def get_type(self, obj):
+        return "topic"
+
+    def get_avatar_url(self, obj):
+        return obj.avatar.url if obj.avatar else None
+
+
+class ChannelSummarySerializer(serializers.ModelSerializer):
+    """A channel as it appears in the sidebar and the public directory.
+
+    Carries the caller's own standing — member, admin, owner — because every
+    surface that renders a channel immediately needs to know which controls to
+    show, and asking separately would be a second round trip for every row.
+    """
+
+    type = serializers.SerializerMethodField()
+    tag = TagSerializer(read_only=True)
+    avatar_url = serializers.SerializerMethodField()
+    member_count = serializers.SerializerMethodField()
+    topic_count = serializers.SerializerMethodField()
+    is_owner = serializers.SerializerMethodField()
+    is_admin = serializers.SerializerMethodField()
+    is_member = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Channel
+        fields = (
+            "id",
+            "type",
+            "name",
+            "bio",
+            "tag",
+            "avatar_url",
+            "member_count",
+            "topic_count",
+            "is_owner",
+            "is_admin",
+            "is_member",
+            "access_level",
+            "allow_media",
+        )
+
+    def get_type(self, obj):
+        return "channel"
+
+    def get_avatar_url(self, obj):
+        return obj.avatar.url if obj.avatar else None
+
+    def get_member_count(self, obj):
+        # Counts the prefetched rows when the caller supplied them, so a list
+        # of N channels stays one query rather than N.
+        return len(obj.members.all())
+
+    def get_topic_count(self, obj):
+        return sum(1 for topic in obj.topics.all() if not topic.is_deleted)
+
+    def _viewer(self):
+        request = self.context.get("request")
+        return getattr(request, "user", None)
+
+    def get_is_owner(self, obj):
+        viewer = self._viewer()
+        return bool(viewer and obj.owner_id == viewer.pk)
+
+    def get_is_admin(self, obj):
+        viewer = self._viewer()
+        if not viewer:
+            return False
+        if obj.owner_id == viewer.pk:
+            return True
+        return any(
+            membership.user_id == viewer.pk and membership.is_admin
+            for membership in obj.channelmembership_set.all()
+        )
+
+    def get_is_member(self, obj):
+        viewer = self._viewer()
+        if not viewer:
+            return False
+        if obj.owner_id == viewer.pk:
+            return True
+        return any(
+            membership.user_id == viewer.pk
+            for membership in obj.channelmembership_set.all()
+        )
+
+
+class ChannelMemberSerializer(serializers.ModelSerializer):
+    """One participant, flagged with the role they hold."""
+
+    user = serializers.SerializerMethodField()
+    is_owner = serializers.SerializerMethodField()
+    is_admin = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChannelMembership
+        fields = ("user", "is_owner", "is_admin")
+
+    def get_user(self, obj):
+        return PublicUserSerializer(obj.user, context=self.context).data
+
+    def get_is_owner(self, obj):
+        return obj.user_id == obj.channel.owner_id
+
+    def get_is_admin(self, obj):
+        # The owner is an admin by definition; the stored flag is only about
+        # the people they promoted.
+        return obj.is_admin or obj.user_id == obj.channel.owner_id
+
+
+class ChannelDetailSerializer(ChannelSummarySerializer):
+    """The full channel profile: who is in it, and what is inside it."""
+
+    owner = serializers.SerializerMethodField()
+    members = serializers.SerializerMethodField()
+    topics = serializers.SerializerMethodField()
+    invite_link = serializers.SerializerMethodField()
+
+    class Meta(ChannelSummarySerializer.Meta):
+        fields = ChannelSummarySerializer.Meta.fields + (
+            "owner",
+            "members",
+            "topics",
+            "invite_link",
+        )
+
+    def get_owner(self, obj):
+        return PublicUserSerializer(obj.owner, context=self.context).data
+
+    def get_members(self, obj):
+        # Who is in a channel is members-only, even when the channel itself is
+        # public: a stranger browsing the directory is deciding whether to
+        # join, and that decision does not need a roster of everyone inside.
+        if not self.get_is_member(obj):
+            return []
+
+        memberships = sorted(
+            obj.channelmembership_set.all(),
+            # Owner first, then admins, then a stable alphabetical order.
+            key=lambda membership: (
+                membership.user_id != obj.owner_id,
+                not membership.is_admin,
+                f"{membership.user.first_name} {membership.user.last_name}"
+                .strip()
+                .lower(),
+                str(membership.user_id),
+            ),
+        )
+        return ChannelMemberSerializer(
+            memberships, many=True, context=self.context
+        ).data
+
+    def get_topics(self, obj):
+        topics = sorted(
+            (topic for topic in obj.topics.all() if not topic.is_deleted),
+            key=lambda topic: (topic.name.lower(), topic.pk),
+        )
+        return TopicSummarySerializer(topics, many=True, context=self.context).data
+
+    def get_invite_link(self, obj):
+        # Only the people who can rotate it have any use for it, and handing a
+        # working invite to every member is a quiet way to lose control of a
+        # private channel.
+        return obj.link if self.get_is_admin(obj) else None
+
+
+class ChannelCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=CHANNEL_NAME_MAX_LENGTH)
+    bio = group_bio_field(required=False, default="")
+    tag = group_tag_field(required=False, allow_null=True)
+    avatar = serializers.ImageField(required=False, allow_null=True)
+    access_level = serializers.ChoiceField(
+        choices=AccessLevel.choices, required=False
+    )
+
+
+class ChannelUpdateSerializer(serializers.Serializer):
+    """Admin-only profile edit. Every field is optional and partial."""
+
+    name = serializers.CharField(max_length=CHANNEL_NAME_MAX_LENGTH, required=False)
+    bio = group_bio_field(required=False)
+    tag = group_tag_field(required=False, allow_null=True)
+    avatar = serializers.ImageField(required=False, allow_null=True)
+    allow_media = serializers.BooleanField(required=False)
+    access_level = serializers.ChoiceField(
+        choices=AccessLevel.choices, required=False
+    )
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("No editable fields were provided.")
+        return attrs
+
+
+class ChannelMemberAddSerializer(serializers.Serializer):
+    user = serializers.CharField()
+
+
+class ChannelAdminSerializer(serializers.Serializer):
+    is_admin = serializers.BooleanField()
+
+
+class TopicCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=TOPIC_NAME_MAX_LENGTH)
+    bio = group_bio_field(required=False, default="")
+    tag = group_tag_field(required=False, allow_null=True)
+    avatar = serializers.ImageField(required=False, allow_null=True)
+    access_level = serializers.ChoiceField(
+        choices=AccessLevel.choices, required=False
+    )
+    allow_member_messages = serializers.BooleanField(required=False)
+
+
+class TopicUpdateSerializer(serializers.Serializer):
+    """Admin-only topic edit, including the posting lock."""
+
+    name = serializers.CharField(max_length=TOPIC_NAME_MAX_LENGTH, required=False)
+    bio = group_bio_field(required=False)
+    tag = group_tag_field(required=False, allow_null=True)
+    avatar = serializers.ImageField(required=False, allow_null=True)
+    access_level = serializers.ChoiceField(
+        choices=AccessLevel.choices, required=False
+    )
+    allow_member_messages = serializers.BooleanField(required=False)
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("No editable fields were provided.")
+        return attrs
