@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { KeyRound, LogIn } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { AuthShell } from "../components/auth/AuthShell";
 import { AuthCard } from "../components/auth/AuthCard";
@@ -11,7 +11,19 @@ import { Button } from "@/components/ui/button";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login, error, clearError } = useAuth();
+
+  // Where the guard bounced the visitor from, so a shared link — a group
+  // invite, say — still lands on its target after signing in. Only in-app
+  // paths are honoured, so the state cannot be used as an open redirect.
+  const redirectState = location.state as { from?: string } | null;
+  const redirectTo =
+    typeof redirectState?.from === "string" &&
+    redirectState.from.startsWith("/") &&
+    !redirectState.from.startsWith("//")
+      ? redirectState.from
+      : "/home";
 
   const [countryCode, setCountryCode] = useState("+98");
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -37,7 +49,7 @@ export function LoginPage() {
     setSubmitting(false);
 
     if (user) {
-      navigate("/home", { replace: true });
+      navigate(redirectTo, { replace: true });
     }
   };
 

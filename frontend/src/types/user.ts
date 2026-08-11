@@ -1,9 +1,12 @@
 export type Gender = "male" | "female" | "other" | "";
 
+/** Who a tag may be attached to. The two vocabularies never mix. */
+export type TagScope = "user" | "group";
+
 export type Tag = {
   id: number;
   title: string;
-  for_humans: boolean;
+  scope: TagScope;
 };
 
 /**
@@ -18,6 +21,7 @@ export type User = {
   first_name?: string;
   last_name?: string;
   gender?: Gender;
+  bio?: string;
   can_be_added_to_group?: boolean;
   avatar_url?: string | null;
   tag?: number | Tag | null;
@@ -29,6 +33,7 @@ export interface RegisterPayload {
   phone_number: string;
   gender: Gender;
   password: string;
+  bio?: string;
 }
 
 export interface LoginPayload {
@@ -46,6 +51,7 @@ export type PublicUser = {
   first_name: string;
   last_name: string;
   gender: Gender;
+  bio?: string;
   avatar_url?: string | null;
   tag?: Tag | null;
 };
