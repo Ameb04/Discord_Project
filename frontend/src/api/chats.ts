@@ -3,6 +3,7 @@ import type {
   ChatHistoryContextResponse,
   ChatHistoryResponse,
   ChatMessage,
+  ChatReadState,
   ChatSearchResponse,
   DirectChat,
   ConversationIndex,
@@ -54,6 +55,32 @@ export async function editMessage(
 
   const response = await client.patch<ChatMessage>(url, { content });
   return response.data;
+}
+
+export async function deleteMessage(
+  chatId: number,
+  messageId: number
+): Promise<void> {
+  await client.delete(`/api/chats/${chatId}/messages/${messageId}/`);
+}
+
+export async function getChatReadState(chatId: number): Promise<ChatReadState> {
+  const response = await client.get<ChatReadState>(
+    `/api/chats/${chatId}/messages/read/`
+  );
+  return response.data;
+}
+
+/** Advance the caller's read watermark. Omit the id to mark everything read. */
+export async function markChatRead(
+  chatId: number,
+  messageId?: number
+): Promise<number> {
+  const response = await client.post<{ last_read_message_id: number }>(
+    `/api/chats/${chatId}/messages/read/`,
+    messageId === undefined ? {} : { message_id: messageId }
+  );
+  return response.data.last_read_message_id;
 }
 
 export async function getChatMessages(
