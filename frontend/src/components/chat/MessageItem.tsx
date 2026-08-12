@@ -1,12 +1,21 @@
 import { Check, CheckCheck, FileText, Paperclip, Pencil, Trash2, X } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 
 import { deleteMessage, editMessage } from "../../api/chats";
 import type { ChatMessage, MessageReceipt } from "../../types/chat";
 import type { User } from "../../types/user";
-import { formatFileSize, formatMessageTimestamp, personDisplayName } from "@/lib/format";
+import { overlayTransition } from "@/components/motion/transitions";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  formatFileSize,
+  formatMessageTimestamp,
+  initialsFor,
+  personDisplayName,
+} from "@/lib/format";
 import { cn } from "@/lib/utils";
 import AttachmentLink from "./AttachmentLink";
+import { HighlightedText } from "./HighlightedText";
 import { Button } from "../ui/button";
 import { ConfirmDialog } from "../ui/confirm-dialog";
 import { Textarea } from "../ui/textarea";
@@ -29,6 +38,14 @@ type MessageItemProps = {
   onOpenProfile?: (phoneNumber: string) => void;
   /** How many other participants have read this message, and whether all have. */
   receipt?: MessageReceipt;
+  /**
+   * Put the sender's picture beside their bubble — on in groups, where "who
+   * said this" is the question every message has to answer, and off in a
+   * direct chat, where there are only two possible answers.
+   */
+  showSenderAvatar?: boolean;
+  /** Active search term, marked inside the message text. */
+  highlightQuery?: string | null;
   isHighlighted?: boolean;
   itemRef?: (node: HTMLLIElement | null) => void;
 };
@@ -148,6 +165,8 @@ function MessageItem({
   canAttachFiles = true,
   onOpenProfile,
   receipt,
+  showSenderAvatar = false,
+  highlightQuery,
   isHighlighted = false,
   itemRef,
 }: MessageItemProps) {
@@ -165,9 +184,14 @@ function MessageItem({
   const fileInputId = useId();
 
   const senderPhoneNumber = message.sender?.phone_number;
+  const senderName = personDisplayName(message.sender);
   const isOwnMessage =
     Boolean(currentUser?.phone_number) &&
     senderPhoneNumber === currentUser?.phone_number;
+  const openSenderProfile =
+    !isOwnMessage && senderPhoneNumber && onOpenProfile
+      ? () => onOpenProfile(senderPhoneNumber)
+      : null;
   // Authors edit their own words; owners moderate by removing, not rewriting.
   const canEdit = isOwnMessage;
   const canDelete = isOwnMessage || canModerate;
@@ -257,34 +281,76 @@ function MessageItem({
     }
   }
 
+  const senderAvatar = showSenderAvatar && !isOwnMessage ? (
+    <Avatar className="size-9 border border-border">
+      {message.sender?.avatar_url ? (
+        <AvatarImage src={message.sender.avatar_url} alt={senderName} />
+      ) : null}
+      <AvatarFallback className="bg-primary/15 text-xs font-semibold text-foreground">
+        {initialsFor(senderName)}
+      </AvatarFallback>
+    </Avatar>
+  ) : null;
+
   return (
     <li
       ref={itemRef}
       className={cn(
-        "group flex scroll-mt-24",
+        "group flex scroll-mt-24 items-end gap-2",
         isOwnMessage ? "justify-end" : "justify-start"
       )}
     >
+      {/* Bottom-aligned, so a tall bubble grows away from the picture and the
+          two stay visually joined at the message's last line. */}
+      {senderAvatar ? (
+        openSenderProfile ? (
+          <button
+            type="button"
+            onClick={openSenderProfile}
+            aria-label={`View ${senderName}'s profile`}
+            className="shrink-0 rounded-full outline-none transition-opacity hover:opacity-80 focus-visible:ring-[3px] focus-visible:ring-ring/40"
+          >
+            {senderAvatar}
+          </button>
+        ) : (
+          <span className="shrink-0">{senderAvatar}</span>
+        )
+      ) : null}
+
       <article
         className={cn(
-          "relative max-w-[min(34rem,100%)] rounded-2xl border px-3 py-2.5 shadow-lg transition-shadow sm:px-4 sm:py-3",
+          "relative min-w-0 max-w-[34rem] rounded-2xl border px-3 py-2.5 shadow-lg transition-shadow sm:px-4 sm:py-3",
           isOwnMessage
             ? "bg-brand-gradient rounded-tr-sm border-transparent text-white shadow-primary/25"
-            : "rounded-tl-sm border-border bg-white/[0.04] text-foreground shadow-black/20",
-          isHighlighted &&
-            "ring-2 ring-primary/70 ring-offset-2 ring-offset-background"
+            : "rounded-tl-sm border-border bg-white/[0.04] text-foreground shadow-black/20"
         )}
       >
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {/* The search hit reads as a wash over the bubble rather than a border
+            swap, so the bubble keeps its own colour and the two states are
+            distinguishable at a glance while stepping through matches. */}
+        <AnimatePresence>
+          {isHighlighted ? (
+            <motion.span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 rounded-[inherit] bg-amber-300/15 ring-2 ring-amber-300/80"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={overlayTransition}
+            />
+          ) : null}
+        </AnimatePresence>
+
+        <div className="relative flex flex-wrap items-center gap-x-3 gap-y-1">
           {/* Someone else's name opens their profile; your own has nothing to
               reveal that you cannot already see in settings. */}
-          {!isOwnMessage && senderPhoneNumber && onOpenProfile ? (
+          {openSenderProfile ? (
             <button
               type="button"
-              onClick={() => onOpenProfile(senderPhoneNumber)}
+              onClick={openSenderProfile}
               className="rounded text-sm font-semibold text-foreground underline-offset-4 outline-none transition-colors hover:text-primary hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/40"
             >
-              {personDisplayName(message.sender)}
+              {senderName}
             </button>
           ) : (
             <p
@@ -293,7 +359,7 @@ function MessageItem({
                 isOwnMessage ? "text-white" : "text-foreground"
               )}
             >
-              {isOwnMessage ? "You" : personDisplayName(message.sender)}
+              {isOwnMessage ? "You" : senderName}
             </p>
           )}
           <div className="flex items-center gap-2">
@@ -344,7 +410,7 @@ function MessageItem({
                   aria-label={
                     isOwnMessage
                       ? "Delete message"
-                      : `Delete message from ${personDisplayName(message.sender)}`
+                      : `Delete message from ${senderName}`
                   }
                   className={cn(
                     actionButtonClass,
@@ -359,7 +425,7 @@ function MessageItem({
         </div>
 
         {isEditing ? (
-          <div className="mt-2 flex flex-col gap-2">
+          <div className="relative mt-2 flex flex-col gap-2">
             {selectedFile ? (
               <AttachmentChip
                 name={selectedFile.name}
@@ -475,7 +541,7 @@ function MessageItem({
             </p>
           </div>
         ) : (
-          <>
+          <div className="relative">
             {message.content ? (
               <p
                 className={cn(
@@ -483,14 +549,17 @@ function MessageItem({
                   isOwnMessage ? "text-white/95" : "text-foreground/80"
                 )}
               >
-                {message.content}
+                <HighlightedText
+                  text={message.content}
+                  query={highlightQuery}
+                />
               </p>
             ) : null}
 
             {message.attachment ? (
               <AttachmentLink attachment={message.attachment} />
             ) : null}
-          </>
+          </div>
         )}
       </article>
 
@@ -500,7 +569,7 @@ function MessageItem({
         description={
           isOwnMessage
             ? "This removes the message for everyone in the conversation."
-            : `This removes ${personDisplayName(message.sender)}'s message for everyone.`
+            : `This removes ${senderName}'s message for everyone.`
         }
         confirmLabel="Delete message"
         pendingLabel="Deleting..."

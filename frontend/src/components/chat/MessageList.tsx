@@ -16,6 +16,10 @@ type MessageListProps = {
   onOpenProfile?: (phoneNumber: string) => void;
   /** Delivery state for one of the viewer's own messages, by message id. */
   receiptFor?: (message: ChatMessage) => MessageReceipt | undefined;
+  /** Show each sender's picture beside their bubble — groups only. */
+  showSenderAvatars?: boolean;
+  /** Active search term, marked inside every message that contains it. */
+  highlightQuery?: string | null;
   highlightMessageId?: number | null;
   messageRefs?: RefObject<Record<number, HTMLLIElement | null>>;
 };
@@ -29,6 +33,8 @@ function MessageList({
   canAttachFiles = true,
   onOpenProfile,
   receiptFor,
+  showSenderAvatars = false,
+  highlightQuery = null,
   highlightMessageId = null,
   messageRefs,
 }: MessageListProps) {
@@ -45,6 +51,8 @@ function MessageList({
           canAttachFiles={canAttachFiles}
           onOpenProfile={onOpenProfile}
           receipt={receiptFor?.(message)}
+          showSenderAvatar={showSenderAvatars}
+          highlightQuery={highlightQuery}
           isHighlighted={highlightMessageId === message.id}
           itemRef={(node) => {
             if (!messageRefs) return;

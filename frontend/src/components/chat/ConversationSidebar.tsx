@@ -45,7 +45,10 @@ function ConversationRow({
       to={to}
       aria-current={isActive ? "page" : undefined}
       className={cn(
-        "flex items-center gap-3 rounded-2xl border px-3 py-2.5 transition-colors",
+        // `overflow-hidden` is the backstop: every text run inside already
+        // truncates, but a badge or an unbroken string must never paint past
+        // the rounded edge of the card.
+        "flex items-center gap-3 overflow-hidden rounded-2xl border px-3 py-2.5 transition-colors",
         isActive
           ? "border-primary/40 bg-primary/10"
           : "border-transparent hover:border-border hover:bg-white/[0.05]"
@@ -81,6 +84,12 @@ function ConversationSidebar({
     },
   ];
   const isEmpty = (activeTab === "private" ? privateChats : groups).length === 0;
+  // "New" means whatever the visible tab is a list of: a direct chat starts by
+  // finding a person, a group starts by describing one.
+  const isPrivateTab = activeTab === "private";
+  const newConversationLabel = isPrivateTab
+    ? "Find someone to message"
+    : "Create a new group";
 
   return (
     <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card/50 shadow-2xl shadow-black/30 backdrop-blur-sm">
@@ -93,17 +102,31 @@ function ConversationSidebar({
             Inbox
           </h2>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="size-9 shrink-0"
-          aria-label="Create a new group"
-          title="New group"
-          onClick={onCreateGroup}
-        >
-          <Plus className="size-4" aria-hidden="true" />
-        </Button>
+        {isPrivateTab ? (
+          <Button
+            asChild
+            variant="outline"
+            size="icon"
+            className="size-9 shrink-0"
+            title="New direct chat"
+          >
+            <Link to="/search" aria-label={newConversationLabel}>
+              <Plus className="size-4" aria-hidden="true" />
+            </Link>
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="size-9 shrink-0"
+            aria-label={newConversationLabel}
+            title="New group"
+            onClick={onCreateGroup}
+          >
+            <Plus className="size-4" aria-hidden="true" />
+          </Button>
+        )}
       </div>
 
       <div className="shrink-0 border-b border-border p-3">
@@ -222,7 +245,7 @@ function ConversationSidebar({
                   : otherUser.phone_number;
 
                 return (
-                  <AnimatedListItem key={chat.id} index={index}>
+                  <AnimatedListItem key={chat.id} index={index} className="min-w-0">
                     <ConversationRow
                       to={`/chats/${chat.id}`}
                       isActive={selectedChatId === chat.id}
@@ -262,7 +285,7 @@ function ConversationSidebar({
                   `${group.member_count} ${group.member_count === 1 ? "member" : "members"}`;
 
                 return (
-                  <AnimatedListItem key={group.id} index={index}>
+                  <AnimatedListItem key={group.id} index={index} className="min-w-0">
                     <ConversationRow
                       to={`/chats/${group.id}`}
                       isActive={selectedChatId === group.id}

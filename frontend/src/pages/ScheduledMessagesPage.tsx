@@ -195,7 +195,7 @@ function ScheduledMessagesPage() {
                       {group.label}
                     </h2>
                     <ul className="grid gap-3">
-                      <AnimatedListPresence>
+                      <AnimatedListPresence reorder>
                         {group.messages.map((message, index) => {
                           const status = statusDetails[message.status];
                           const StatusIcon = status.icon;
@@ -203,7 +203,7 @@ function ScheduledMessagesPage() {
                           const isCancelling = cancellingId === message.id;
 
                           return (
-                            <AnimatedListItem key={message.id} index={index}>
+                            <AnimatedListItem key={message.id} index={index} reorder>
                               <Card className="gap-3 p-4 sm:p-5">
                                 <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                                   <Link
