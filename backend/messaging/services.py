@@ -10,6 +10,7 @@ from chats.permissions import can_send_to_chat
 from core.models import File
 
 from .models import NormalMessage
+from .realtime import broadcast_message_after_commit
 
 
 def get_private_storage():
@@ -34,11 +35,13 @@ def create_text_message(sender, chat, content):
         raise PermissionDenied("You do not have permission to send to this chat.")
 
     normalized_content = _validate_text_content(content)
-    return NormalMessage.objects.create(
+    message = NormalMessage.objects.create(
         sender=sender,
         chat=chat,
         content=normalized_content,
     )
+    broadcast_message_after_commit(message)
+    return message
 
 
 def create_media_message(sender, chat, uploaded_file, content=""):
@@ -66,12 +69,14 @@ def create_media_message(sender, chat, uploaded_file, content=""):
                 storage_path=saved_path,
                 size=file_size,
             )
-            return NormalMessage.objects.create(
+            message = NormalMessage.objects.create(
                 sender=sender,
                 chat=chat,
                 content=normalized_content,
                 file=stored_file,
             )
+            broadcast_message_after_commit(message)
+            return message
     except Exception:
         storage.delete(saved_path)
         raise

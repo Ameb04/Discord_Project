@@ -5,6 +5,7 @@ import {
   MessageCircle,
   Search,
   SearchX,
+  WifiOff,
 } from "lucide-react";
 import {
   useEffect,
@@ -15,6 +16,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { getChatMessageContext, getChatMessages, searchChatMessages } from "../api/chats";
+import { chatWebSocketUrl, parseLiveMessageEvent } from "../api/chatSocket";
 import MessageComposer from "../components/chat/MessageComposer";
 import MessageList from "../components/chat/MessageList";
 import { Skeleton } from "../components/ui/skeleton";
@@ -28,6 +30,30 @@ type ChatPageProps = {
   title?: string;
   subtitle?: string;
 };
+
+type LiveConnectionState =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "disconnected";
+
+const MAX_RECONNECT_ATTEMPTS = 5;
+
+function mergeMessagesById(
+  currentMessages: ChatMessage[],
+  incomingMessages: ChatMessage[]
+) {
+  const messagesById = new Map(
+    currentMessages.map((message) => [message.id, message])
+  );
+  for (const message of incomingMessages) {
+    messagesById.set(message.id, message);
+  }
+  return Array.from(messagesById.values()).sort((first, second) => {
+    const timestampOrder = first.sent_at.localeCompare(second.sent_at);
+    return timestampOrder || first.id - second.id;
+  });
+}
 
 function extractChatError(error: unknown) {
   if (typeof error === "object" && error !== null) {
@@ -77,6 +103,8 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [error, setError] = useState("");
+  const [liveConnectionState, setLiveConnectionState] =
+    useState<LiveConnectionState>("connecting");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
@@ -93,6 +121,7 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
 
     async function loadMessages() {
       setIsLoading(true);
+      setMessages([]);
       setError("");
       setSearchError("");
       setSearchResults([]);
@@ -102,7 +131,9 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
       try {
         const history = await getChatMessages(chatId);
         if (isCurrent) {
-          setMessages(history.results);
+          setMessages((currentMessages) =>
+            mergeMessagesById(currentMessages, history.results)
+          );
           setHasOlderMessages(history.has_older);
         }
       } catch (err) {
@@ -124,6 +155,111 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
   }, [chatId]);
 
   useEffect(() => {
+    let socket: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectAttempts = 0;
+    let shouldCatchUp = false;
+    let disposed = false;
+
+    async function catchUpRecentMessages() {
+      try {
+        const history = await getChatMessages(chatId);
+        if (disposed) return;
+        setMessages((currentMessages) =>
+          mergeMessagesById(currentMessages, history.results)
+        );
+        setHasOlderMessages((currentValue) =>
+          currentValue || history.has_older
+        );
+      } catch {
+        // REST loading and sending stay usable if reconnect catch-up fails.
+      }
+    }
+
+    function connect() {
+      if (disposed) return;
+
+      setLiveConnectionState(
+        reconnectAttempts > 0 ? "reconnecting" : "connecting"
+      );
+      try {
+        socket = new WebSocket(chatWebSocketUrl(chatId));
+      } catch {
+        shouldCatchUp = true;
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+          setLiveConnectionState("disconnected");
+          return;
+        }
+        const delay = Math.min(1000 * 2 ** reconnectAttempts, 10000);
+        reconnectAttempts += 1;
+        setLiveConnectionState("reconnecting");
+        reconnectTimer = setTimeout(connect, delay);
+        return;
+      }
+
+      socket.onopen = () => {
+        if (disposed) {
+          socket?.close(1000, "Conversation changed");
+          return;
+        }
+
+        const catchUpNeeded = shouldCatchUp;
+        reconnectAttempts = 0;
+        shouldCatchUp = false;
+        setLiveConnectionState("connected");
+        if (catchUpNeeded) {
+          void catchUpRecentMessages();
+        }
+      };
+
+      socket.onmessage = (event) => {
+        if (disposed || typeof event.data !== "string") return;
+        const message = parseLiveMessageEvent(event.data);
+        if (!message || message.chat !== chatId) return;
+
+        setMessages((currentMessages) =>
+          mergeMessagesById(currentMessages, [message])
+        );
+      };
+
+      socket.onerror = () => {
+        if (!disposed) setLiveConnectionState("reconnecting");
+      };
+
+      socket.onclose = (event) => {
+        socket = null;
+        if (disposed) return;
+
+        shouldCatchUp = true;
+        if (event.code === 4401 || event.code === 4403) {
+          setLiveConnectionState("disconnected");
+          return;
+        }
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+          setLiveConnectionState("disconnected");
+          return;
+        }
+
+        const delay = Math.min(1000 * 2 ** reconnectAttempts, 10000);
+        reconnectAttempts += 1;
+        setLiveConnectionState("reconnecting");
+        reconnectTimer = setTimeout(connect, delay);
+      };
+    }
+
+    connect();
+
+    return () => {
+      disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (socket) {
+        socket.onclose = null;
+        socket.close(1000, "Conversation changed");
+      }
+    };
+  }, [chatId]);
+
+  useEffect(() => {
     if (highlightMessageId == null) return;
     const node = messageRefs.current[highlightMessageId];
     if (node) {
@@ -132,12 +268,9 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
   }, [highlightMessageId, messages]);
 
   function handleMessageSent(message: ChatMessage) {
-    setMessages((currentMessages) => {
-      if (currentMessages.some((currentMessage) => currentMessage.id === message.id)) {
-        return currentMessages;
-      }
-      return [...currentMessages, message];
-    });
+    setMessages((currentMessages) =>
+      mergeMessagesById(currentMessages, [message])
+    );
     setHighlightMessageId(message.id);
   }
 
@@ -239,6 +372,17 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
               ? "Loading messages..."
               : `${messages.length} ${messages.length === 1 ? "message" : "messages"}`}
           </p>
+          {liveConnectionState === "reconnecting" ? (
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-amber-200/80">
+              <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+              Reconnecting live updates...
+            </p>
+          ) : liveConnectionState === "disconnected" ? (
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <WifiOff className="size-3" aria-hidden="true" />
+              Live updates unavailable. Reopen the chat to retry.
+            </p>
+          ) : null}
         </div>
       </header>
 
