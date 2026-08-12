@@ -23,6 +23,7 @@ export type User = {
   gender?: Gender;
   bio?: string;
   can_be_added_to_group?: boolean;
+  can_be_added_to_channel?: boolean;
   avatar_url?: string | null;
   tag?: number | Tag | null;
 };
