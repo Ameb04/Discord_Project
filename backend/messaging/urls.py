@@ -7,6 +7,9 @@ from .views import (
     MessageHistoryView,
     MessageListCreateView,
     MessageSearchView,
+    ScheduledMessageCreateView,
+    ScheduledMessageCancelView,
+    ScheduledMessageListView,
 )
 
 app_name = "messaging"
@@ -20,10 +23,25 @@ chat_message_patterns = [
         name="message-context",
     ),
     path("media/", MediaMessageCreateView.as_view(), name="media-message"),
+    path(
+        "scheduled/",
+        ScheduledMessageCreateView.as_view(),
+        name="scheduled-message",
+    ),
     path("", MessageListCreateView.as_view(), name="message-list"),
 ]
 
 urlpatterns = [
+    path(
+        "scheduled/<int:message_id>/",
+        ScheduledMessageCancelView.as_view(),
+        name="scheduled-message-cancel",
+    ),
+    path(
+        "scheduled/",
+        ScheduledMessageListView.as_view(),
+        name="scheduled-message-list",
+    ),
     path(
         "<int:message_id>/attachment/",
         AttachmentDownloadView.as_view(),

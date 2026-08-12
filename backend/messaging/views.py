@@ -11,15 +11,25 @@ from rest_framework.views import APIView
 from chats.models import Chat
 from chats.permissions import can_access_chat
 
-from .models import Message, NormalMessage
+from .models import (
+    Message,
+    NormalMessage,
+    ScheduledMessage,
+    ScheduledMessageStatus,
+)
 from .serializers import (
     MediaMessageCreateSerializer,
     MessageSearchResultSerializer,
     NormalMessageSerializer,
+    ScheduledMessageListSerializer,
+    ScheduledMessageSerializer,
+    ScheduledTextMessageCreateSerializer,
     TextMessageCreateSerializer,
 )
 from .services import (
+    cancel_scheduled_message,
     create_media_message,
+    create_scheduled_text_message,
     create_text_message,
     get_private_storage,
 )
@@ -165,6 +175,65 @@ class MessageHistoryView(APIView):
             }
         )
         return Response(payload)
+
+
+class ScheduledMessageCreateView(APIView):
+    """POST /api/chats/<chat_id>/messages/scheduled/."""
+
+    def post(self, request, chat_id):
+        chat = get_object_or_404(Chat, pk=chat_id)
+        request_serializer = ScheduledTextMessageCreateSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+
+        try:
+            message = create_scheduled_text_message(
+                request.user,
+                chat,
+                request_serializer.validated_data["content"],
+                request_serializer.validated_data["scheduled_at"],
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(_validation_error_detail(exc)) from exc
+        except DjangoPermissionDenied as exc:
+            raise PermissionDenied(str(exc)) from exc
+
+        response_serializer = ScheduledMessageSerializer(
+            message, context={"request": request}
+        )
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ScheduledMessageListView(APIView):
+    """GET /api/messages/scheduled/."""
+
+    def get(self, request):
+        messages = (
+            ScheduledMessage.objects.filter(sender=request.user).exclude(
+                status=ScheduledMessageStatus.CANCELLED
+            )
+            .select_related(
+                "chat", "chat__pv", "chat__group", "chat__topic__channel"
+            )
+            .order_by("scheduled_at", "pk")
+        )
+        serializer = ScheduledMessageListSerializer(
+            messages, many=True, context={"request": request}
+        )
+        return Response(serializer.data)
+
+
+class ScheduledMessageCancelView(APIView):
+    """DELETE /api/messages/scheduled/<message_id>/."""
+
+    def delete(self, request, message_id):
+        try:
+            message = cancel_scheduled_message(request.user, message_id)
+        except DjangoValidationError as exc:
+            raise ValidationError(_validation_error_detail(exc)) from exc
+
+        if message is None:
+            raise NotFound("Scheduled message not found.")
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class MessageSearchView(APIView):

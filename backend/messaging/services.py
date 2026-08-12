@@ -1,15 +1,18 @@
+from datetime import datetime, timezone as datetime_timezone
 from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import FileSystemStorage, storages
 from django.db import transaction
+from django.utils import timezone
 from django.utils.text import get_valid_filename
 
 from chats.permissions import can_send_to_chat
 from core.models import File
 
-from .models import NormalMessage
+from .models import NormalMessage, ScheduledMessage, ScheduledMessageStatus
+from .realtime import broadcast_message_after_commit
 
 
 def get_private_storage():
@@ -34,11 +37,105 @@ def create_text_message(sender, chat, content):
         raise PermissionDenied("You do not have permission to send to this chat.")
 
     normalized_content = _validate_text_content(content)
-    return NormalMessage.objects.create(
+    message = NormalMessage.objects.create(
         sender=sender,
         chat=chat,
         content=normalized_content,
     )
+    broadcast_message_after_commit(message)
+    return message
+
+
+def create_scheduled_text_message(sender, chat, content, scheduled_at):
+    """Store a text message for future delivery without sending it yet."""
+    _validate_sender(sender)
+    if chat is None:
+        raise ValidationError({"chat": "Chat is required."})
+    if not can_send_to_chat(sender, chat):
+        raise PermissionDenied("You do not have permission to send to this chat.")
+
+    normalized_content = _validate_text_content(content)
+    normalized_scheduled_at = _validate_future_datetime(scheduled_at)
+    return ScheduledMessage.objects.create(
+        sender=sender,
+        chat=chat,
+        content=normalized_content,
+        scheduled_at=normalized_scheduled_at,
+    )
+
+
+def deliver_scheduled_message(scheduled_message_id, *, current_time=None):
+    """Deliver one due message exactly once, returning its locked record."""
+    effective_time = current_time or timezone.now()
+    with transaction.atomic():
+        try:
+            scheduled_message = (
+                ScheduledMessage.objects.select_for_update()
+                .select_related("chat")
+                .get(pk=scheduled_message_id)
+            )
+        except ScheduledMessage.DoesNotExist:
+            return None
+
+        if scheduled_message.status != ScheduledMessageStatus.PENDING:
+            return scheduled_message
+        if scheduled_message.scheduled_at > effective_time:
+            return scheduled_message
+
+        try:
+            delivered_message = create_text_message(
+                scheduled_message.sender,
+                scheduled_message.chat,
+                scheduled_message.content,
+            )
+        except (PermissionDenied, ValidationError) as exc:
+            scheduled_message.status = ScheduledMessageStatus.FAILED
+            scheduled_message.processed_at = effective_time
+            scheduled_message.failure_reason = _delivery_failure_reason(exc)
+            scheduled_message.save(
+                update_fields=("status", "processed_at", "failure_reason")
+            )
+            return scheduled_message
+
+        scheduled_message.status = ScheduledMessageStatus.SENT
+        scheduled_message.processed_at = effective_time
+        scheduled_message.failure_reason = ""
+        scheduled_message.delivered_message = delivered_message
+        scheduled_message.save(
+            update_fields=(
+                "status",
+                "processed_at",
+                "failure_reason",
+                "delivered_message",
+            )
+        )
+        return scheduled_message
+
+
+def cancel_scheduled_message(sender, scheduled_message_id):
+    """Cancel one owned pending message while excluding the delivery worker."""
+    _validate_sender(sender)
+    with transaction.atomic():
+        try:
+            scheduled_message = ScheduledMessage.objects.select_for_update().get(
+                pk=scheduled_message_id,
+                sender=sender,
+            )
+        except ScheduledMessage.DoesNotExist:
+            return None
+
+        if scheduled_message.status != ScheduledMessageStatus.PENDING:
+            raise ValidationError(
+                {"status": "Only pending scheduled messages can be cancelled."}
+            )
+
+        scheduled_message.status = ScheduledMessageStatus.CANCELLED
+        scheduled_message.processed_at = timezone.now()
+        scheduled_message.failure_reason = ""
+        scheduled_message.save(
+            update_fields=("status", "processed_at", "failure_reason")
+        )
+        return scheduled_message
 
 
 def create_media_message(sender, chat, uploaded_file, content=""):
@@ -66,12 +163,14 @@ def create_media_message(sender, chat, uploaded_file, content=""):
                 storage_path=saved_path,
                 size=file_size,
             )
-            return NormalMessage.objects.create(
+            message = NormalMessage.objects.create(
                 sender=sender,
                 chat=chat,
                 content=normalized_content,
                 file=stored_file,
             )
+            broadcast_message_after_commit(message)
+            return message
     except Exception:
         storage.delete(saved_path)
         raise
@@ -101,6 +200,31 @@ def _validate_optional_content(content):
     if not isinstance(content, str):
         raise ValidationError({"content": "Message content must be text."})
     return content.strip()
+
+
+def _validate_future_datetime(value):
+    if not isinstance(value, datetime) or not timezone.is_aware(value):
+        raise ValidationError(
+            {"scheduled_at": "Delivery time must include a timezone."}
+        )
+    if value <= timezone.now():
+        raise ValidationError(
+            {"scheduled_at": "Delivery time must be in the future."}
+        )
+    return value.astimezone(datetime_timezone.utc)
+
+
+def _delivery_failure_reason(error):
+    if hasattr(error, "message_dict"):
+        messages = [
+            message
+            for values in error.message_dict.values()
+            for message in values
+        ]
+        return " ".join(messages)
+    if hasattr(error, "messages"):
+        return " ".join(error.messages)
+    return str(error)
 
 
 def _validate_uploaded_file(uploaded_file):

@@ -1,12 +1,17 @@
-import { FileText, Paperclip, Send, X } from "lucide-react";
+import { CalendarClock, FileText, Paperclip, Send, X } from "lucide-react";
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { sendMediaMessage, sendTextMessage } from "../../api/chats";
+import {
+  scheduleTextMessage,
+  sendMediaMessage,
+  sendTextMessage,
+} from "../../api/chats";
 import type { ChatMessage } from "../../types/chat";
 import { Button } from "../ui/button";
 
 type MessageComposerProps = {
   chatId: number;
   disabled?: boolean;
+  conversationLabel: string;
   onMessageSent: (message: ChatMessage) => void;
 };
 
@@ -34,6 +39,10 @@ function extractSendError(error: unknown) {
       if (Array.isArray(fileError) && typeof fileError[0] === "string") {
         return fileError[0];
       }
+      const scheduledAtError = data.scheduled_at;
+      if (Array.isArray(scheduledAtError) && typeof scheduledAtError[0] === "string") {
+        return scheduledAtError[0];
+      }
       const detail = data.detail;
       if (typeof detail === "string") return detail;
     }
@@ -50,16 +59,37 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function MessageComposer({ chatId, disabled = false, onMessageSent }: MessageComposerProps) {
+function minimumLocalScheduleTime() {
+  const date = new Date(Date.now() + 60_000);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function MessageComposer({
+  chatId,
+  disabled = false,
+  conversationLabel,
+  onMessageSent,
+}: MessageComposerProps) {
   const fileInputId = useId();
+  const scheduleInputId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [content, setContent] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isScheduleMode, setIsScheduleMode] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const trimmedContent = content.trim();
-  const canSend = (Boolean(trimmedContent) || Boolean(selectedFile)) && !isSending && !disabled;
-  const statusText = selectedFile ? "Uploading..." : "Sending...";
+  const canSend = isScheduleMode
+    ? Boolean(trimmedContent) && Boolean(scheduledAt) && !isSending && !disabled
+    : (Boolean(trimmedContent) || Boolean(selectedFile)) && !isSending && !disabled;
+  const statusText = isScheduleMode
+    ? "Scheduling..."
+    : selectedFile
+      ? "Uploading..."
+      : "Sending...";
 
   async function handleSubmit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -67,12 +97,23 @@ function MessageComposer({ chatId, disabled = false, onMessageSent }: MessageCom
 
     setIsSending(true);
     setError("");
+    setSuccess("");
 
     try {
-      const message = selectedFile
-        ? await sendMediaMessage(chatId, selectedFile, trimmedContent)
-        : await sendTextMessage(chatId, trimmedContent);
-      onMessageSent(message);
+      if (isScheduleMode) {
+        const localDate = new Date(scheduledAt);
+        if (Number.isNaN(localDate.getTime())) {
+          throw new Error("Choose a valid delivery time.");
+        }
+        await scheduleTextMessage(chatId, trimmedContent, localDate.toISOString());
+        setSuccess("Message scheduled for this conversation.");
+        setScheduledAt("");
+      } else {
+        const message = selectedFile
+          ? await sendMediaMessage(chatId, selectedFile, trimmedContent)
+          : await sendTextMessage(chatId, trimmedContent);
+        onMessageSent(message);
+      }
       setContent("");
       clearSelectedFile();
     } catch (err) {
@@ -131,6 +172,33 @@ function MessageComposer({ chatId, disabled = false, onMessageSent }: MessageCom
         </div>
       ) : null}
 
+      {isScheduleMode ? (
+        <div className="mb-3 rounded-2xl border border-primary/25 bg-primary/10 px-4 py-3">
+          <p className="text-sm font-medium text-foreground">
+            Schedule for {conversationLabel}
+          </p>
+          <label
+            htmlFor={scheduleInputId}
+            className="mt-3 block text-xs font-medium text-muted-foreground"
+          >
+            Local delivery date and time
+          </label>
+          <input
+            id={scheduleInputId}
+            type="datetime-local"
+            value={scheduledAt}
+            min={minimumLocalScheduleTime()}
+            disabled={disabled || isSending}
+            className="mt-1.5 h-10 w-full rounded-xl border border-input bg-black/20 px-3 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40"
+            onChange={(event) => {
+              setScheduledAt(event.target.value);
+              setError("");
+              setSuccess("");
+            }}
+          />
+        </div>
+      ) : null}
+
       <div className="flex items-end gap-3">
         <input
           ref={fileInputRef}
@@ -149,6 +217,21 @@ function MessageComposer({ chatId, disabled = false, onMessageSent }: MessageCom
           onClick={() => fileInputRef.current?.click()}
         >
           <Paperclip className="size-4" aria-hidden="true" />
+        </Button>
+        <Button
+          type="button"
+          variant={isScheduleMode ? "default" : "outline"}
+          size="icon"
+          disabled={disabled || isSending || Boolean(selectedFile)}
+          aria-label={isScheduleMode ? "Cancel scheduling" : "Schedule message"}
+          onClick={() => {
+            setIsScheduleMode((current) => !current);
+            setScheduledAt("");
+            setError("");
+            setSuccess("");
+          }}
+        >
+          <CalendarClock className="size-4" aria-hidden="true" />
         </Button>
 
         <textarea
@@ -180,6 +263,12 @@ function MessageComposer({ chatId, disabled = false, onMessageSent }: MessageCom
       {error ? (
         <p role="alert" className="mt-3 text-sm text-red-100/80">
           {error}
+        </p>
+      ) : null}
+
+      {success ? (
+        <p role="status" className="mt-3 text-sm text-emerald-200/80">
+          {success}
         </p>
       ) : null}
     </form>

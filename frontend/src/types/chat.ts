@@ -42,6 +42,29 @@ export type ChatMessage = {
   attachment: AttachmentMetadata | null;
 };
 
+export type ScheduledChatMessage = {
+  id: number;
+  chat: number;
+  sender: PublicUser | null;
+  content: string;
+  created_at: string;
+  scheduled_at: string;
+};
+
+export type ScheduledMessageStatus = "pending" | "sent" | "failed";
+
+export type ScheduledMessageSummary = {
+  id: number;
+  destination: {
+    id: number;
+    type: "direct" | "group" | "topic" | "chat";
+    name: string;
+  };
+  preview: string;
+  scheduled_at: string;
+  status: ScheduledMessageStatus;
+};
+
 export type ChatHistoryResponse = {
   results: ChatMessage[];
   count: number;

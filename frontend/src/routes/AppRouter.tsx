@@ -9,6 +9,7 @@ import { LandingPage } from "../pages/LandingPage";
 import { LoginPage } from "../pages/LoginPage";
 import { SignupPage } from "../pages/SignupPage";
 import ProfilePage from "../pages/ProfilePage";
+import ScheduledMessagesPage from "../pages/ScheduledMessagesPage";
 
 function LoadingScreen() {
   return (
@@ -72,6 +73,7 @@ export function AppRouter() {
           <Route path="/home" element={<HomePage />} />
           <Route path="/search" element={<SearchResultsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/scheduled" element={<ScheduledMessagesPage />} />
           <Route path="/profile/:phone_number" element={<ProfilePage />} />
           <Route path="/chats/:chatId" element={<HomePage />} />
         </Route>

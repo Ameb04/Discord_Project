@@ -76,6 +76,28 @@ services:
       - minio
     command: python manage.py runserver 0.0.0.0:8000
 
+  celery-worker:
+    build: ./backend
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+    command: celery -A config worker --loglevel=info
+
+  celery-beat:
+    build: ./backend
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+    command: celery -A config beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+
   frontend:
     build:
       context: .
