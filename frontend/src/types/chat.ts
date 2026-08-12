@@ -1,6 +1,6 @@
 import type { PublicUser, Tag } from "./user";
 
-export type ConversationTab = "private" | "groups";
+export type ConversationTab = "private" | "groups" | "channels";
 
 export type DirectChat = {
   id: number;
@@ -47,9 +47,82 @@ export type GroupInvitePreview = {
   is_member: boolean;
 };
 
+/**
+ * A topic — the only thing inside a channel that actually holds messages.
+ *
+ * `id` is a chat id, the same namespace as a group or a direct chat, so a
+ * topic opens at `/chats/:id` through the very same page.
+ */
+export type Topic = {
+  id: number;
+  type: "topic";
+  name: string;
+  bio: string;
+  tag: Tag | null;
+  avatar_url: string | null;
+  channel: number;
+  access_level: GroupAccessLevel;
+  /** False while admins have the topic closed to everyone but themselves. */
+  allow_member_messages: boolean;
+};
+
+/**
+ * A channel as any surface knows it.
+ *
+ * Carries the viewer's own standing, because every list that renders a channel
+ * immediately has to decide which controls to show.
+ */
+export type ChannelConversation = {
+  id: number;
+  type: "channel";
+  name: string;
+  bio: string;
+  tag: Tag | null;
+  avatar_url: string | null;
+  member_count: number;
+  topic_count: number;
+  is_owner: boolean;
+  is_admin: boolean;
+  is_member: boolean;
+  access_level: GroupAccessLevel;
+  allow_media: boolean;
+};
+
+export type ChannelMember = {
+  user: PublicUser;
+  is_owner: boolean;
+  is_admin: boolean;
+};
+
+/**
+ * The full channel, with its people and its topics.
+ *
+ * `members` comes back empty for a non-member previewing a public channel, and
+ * `invite_link` is null for anyone who is not an admin.
+ */
+export type ChannelDetail = ChannelConversation & {
+  owner: PublicUser;
+  members: ChannelMember[];
+  topics: Topic[];
+  invite_link: string | null;
+};
+
+/** The public preview an invite link shows before the visitor commits. */
+export type ChannelInvitePreview = {
+  id: number;
+  name: string;
+  bio: string;
+  avatar_url: string | null;
+  member_count: number;
+  topic_count: number;
+  access_level: GroupAccessLevel;
+  is_member: boolean;
+};
+
 export type ConversationIndex = {
   private_chats: DirectChat[];
   groups: GroupConversation[];
+  channels: ChannelDetail[];
 };
 
 export type AttachmentMetadata = {

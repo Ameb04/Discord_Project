@@ -2,8 +2,10 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  Hash,
   Info,
   LoaderCircle,
+  Lock,
   MessageCircle,
   Search,
   Users,
@@ -18,7 +20,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import {
   getChatMessageContext,
@@ -44,11 +46,13 @@ import { GroupInfoDialog } from "@/components/group/GroupInfoDialog";
 import { UserProfileDialog } from "@/components/user/UserProfileDialog";
 import { personDisplayName } from "@/lib/format";
 import type {
+  ChannelDetail,
   ChatMessage,
   ChatReadState,
   ChatSearchResult,
   GroupConversation,
   GroupDetail,
+  Topic,
 } from "../types/chat";
 import type { PublicUser } from "../types/user";
 
@@ -60,6 +64,9 @@ type ChatPageProps = {
   group?: GroupConversation;
   /** Present when this chat is a direct one — the person on the other end. */
   directPeer?: PublicUser;
+  /** Present when this chat is a topic, along with the channel that owns it. */
+  topic?: Topic;
+  topicChannel?: ChannelDetail;
   /** Called when the group's profile changed elsewhere in this view. */
   onGroupChanged?: (group: GroupDetail) => void;
   /** Called after the owner deletes this group. */
@@ -135,10 +142,13 @@ function ChatPage({
   subtitle,
   group,
   directPeer,
+  topic,
+  topicChannel,
   onGroupChanged,
   onGroupDeleted,
 }: ChatPageProps) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const messageRefs = useRef<Record<number, HTMLLIElement | null>>({});
   const historyRef = useRef<HTMLDivElement | null>(null);
 
@@ -177,10 +187,19 @@ function ChatPage({
 
   const fallbackTitle = useMemo(() => `Chat #${chatId}`, [chatId]);
 
-  // A group owner moderates by deleting; media stays off until they enable it,
-  // though their own uploads are never blocked by their own switch.
-  const canModerate = Boolean(group?.is_owner);
-  const canAttachFiles = !group || group.allow_media || group.is_owner;
+  // Whoever runs the room moderates by deleting — a group's owner, a channel's
+  // owner and admins. Media stays off until they enable it, though their own
+  // uploads are never blocked by their own switch.
+  const canModerate = Boolean(group?.is_owner) || Boolean(topicChannel?.is_admin);
+  const canAttachFiles = group
+    ? group.allow_media || group.is_owner
+    : topicChannel
+      ? topicChannel.allow_media || topicChannel.is_admin
+      : true;
+  // A topic can be closed to everyone but the channel's admins.
+  const isTopicLocked = Boolean(
+    topic && !topic.allow_member_messages && !topicChannel?.is_admin
+  );
 
   const newestMessageId = messages.length ? messages[messages.length - 1].id : null;
 
@@ -640,21 +659,27 @@ function ChatPage({
 
   const emptyHistory = !isLoading && !error && messages.length === 0;
   const searchDisabled = isLoading || Boolean(error);
-  const headerTitle = group?.name ?? title ?? fallbackTitle;
+  const headerTitle = group?.name ?? topic?.name ?? title ?? fallbackTitle;
 
-  // The header's identity block leads somewhere in both kinds of conversation:
-  // to the group's members and settings, or to the other person's profile.
+  // The header's identity block leads somewhere in every kind of conversation:
+  // to the group's members and settings, to the channel a topic belongs to, or
+  // to the other person's profile.
   const identity = group
     ? {
         label: `View ${group.name} members and details`,
         onClick: () => setIsGroupInfoOpen(true),
       }
-    : directPeer
+    : topicChannel
       ? {
-          label: `View ${personDisplayName(directPeer)}'s profile`,
-          onClick: () => setProfilePhoneNumber(directPeer.phone_number),
+          label: `Open the ${topicChannel.name} channel`,
+          onClick: () => navigate(`/channels/${topicChannel.id}`),
         }
-      : null;
+      : directPeer
+        ? {
+            label: `View ${personDisplayName(directPeer)}'s profile`,
+            onClick: () => setProfilePhoneNumber(directPeer.phone_number),
+          }
+        : null;
 
   const conversationAvatar = group ? (
     <Avatar className="hidden size-11 shrink-0 border border-border sm:block">
@@ -663,6 +688,15 @@ function ChatPage({
       ) : null}
       <AvatarFallback className="bg-primary/15 text-foreground">
         <Users className="size-5" aria-hidden="true" />
+      </AvatarFallback>
+    </Avatar>
+  ) : topic ? (
+    <Avatar className="hidden size-11 shrink-0 border border-border sm:block">
+      {topic.avatar_url ? (
+        <AvatarImage src={topic.avatar_url} alt={topic.name} />
+      ) : null}
+      <AvatarFallback className="bg-primary/15 text-foreground">
+        <Hash className="size-5" aria-hidden="true" />
       </AvatarFallback>
     </Avatar>
   ) : directPeer?.avatar_url ? (
@@ -875,7 +909,7 @@ function ChatPage({
               canAttachFiles={canAttachFiles}
               onOpenProfile={setProfilePhoneNumber}
               receiptFor={receiptFor}
-              showSenderAvatars={Boolean(group)}
+              showSenderAvatars={Boolean(group) || Boolean(topic)}
               highlightQuery={isSearchOpen ? searchedQuery : null}
               highlightMessageId={focusedMessage?.id ?? null}
               messageRefs={messageRefs}
@@ -912,11 +946,21 @@ function ChatPage({
         </AnimatePresence>
       </div>
 
-      {error ? null : (
+      {error ? null : isTopicLocked ? (
+        // A composer that only rejects on submit is worse than no composer:
+        // say who can post here, and leave the reading experience alone.
+        <div className="flex shrink-0 items-center gap-3 border-t border-border bg-black/20 px-3 py-4 text-sm text-muted-foreground sm:px-6">
+          <Lock className="size-4 shrink-0 text-muted-foreground/70" aria-hidden="true" />
+          <p>
+            Only admins can post in this topic. You can still read everything
+            here.
+          </p>
+        </div>
+      ) : (
         <MessageComposer
           chatId={chatId}
           disabled={isLoading || Boolean(error)}
-          conversationLabel={group?.name ?? title ?? fallbackTitle}
+          conversationLabel={headerTitle}
           canAttachFiles={canAttachFiles}
           onMessageSent={handleMessageSent}
         />

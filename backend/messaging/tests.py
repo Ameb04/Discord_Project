@@ -13,6 +13,7 @@ from accounts.models import User
 from chats.models import (
     AccessLevel,
     Channel,
+    ChannelMembership,
     Group,
     GroupMembership,
     Pv,
@@ -135,7 +136,21 @@ class TextMessageCreationServiceTests(TestCase):
 
         self.assert_no_messages_created()
 
-    def test_authorized_topic_user_can_send_text_message(self):
+    def test_channel_member_can_send_in_a_topic(self):
+        channel = Channel.objects.create(name="Public channel", owner=self.owner)
+        topic = Topic.objects.create(
+            name="Public topic",
+            channel=channel,
+            access_level=AccessLevel.PUBLIC,
+        )
+        ChannelMembership.objects.create(channel=channel, user=self.third_user)
+
+        message = create_text_message(self.third_user, topic, "Topic message")
+
+        self.assertEqual(message.chat, topic)
+        self.assertEqual(message.sender, self.third_user)
+
+    def test_non_member_cannot_send_in_a_public_channel_topic(self):
         channel = Channel.objects.create(name="Public channel", owner=self.owner)
         topic = Topic.objects.create(
             name="Public topic",
@@ -143,10 +158,22 @@ class TextMessageCreationServiceTests(TestCase):
             access_level=AccessLevel.PUBLIC,
         )
 
-        message = create_text_message(self.third_user, topic, "Topic message")
+        with self.assertRaises(PermissionDenied):
+            create_text_message(self.third_user, topic, "Topic message")
 
-        self.assertEqual(message.chat, topic)
-        self.assertEqual(message.sender, self.third_user)
+        self.assert_no_messages_created()
+
+    def test_locked_topic_rejects_a_plain_member(self):
+        channel = Channel.objects.create(name="Public channel", owner=self.owner)
+        topic = Topic.objects.create(
+            name="Announcements", channel=channel, allow_member_messages=False
+        )
+        ChannelMembership.objects.create(channel=channel, user=self.third_user)
+
+        with self.assertRaises(PermissionDenied):
+            create_text_message(self.third_user, topic, "Topic message")
+
+        self.assert_no_messages_created()
 
     def test_empty_string_is_rejected(self):
         pv = self.create_authorized_pv()
@@ -833,13 +860,16 @@ class MediaMessageCreationServiceTests(PrivateMediaTestMixin, TestCase):
 
         self.assert_no_messages_files_or_private_uploads()
 
-    def test_authorized_topic_user_can_upload(self):
-        channel = Channel.objects.create(name="Public channel", owner=self.owner)
+    def test_channel_member_can_upload_when_media_is_allowed(self):
+        channel = Channel.objects.create(
+            name="Public channel", owner=self.owner, allow_media=True
+        )
         topic = Topic.objects.create(
             name="Public topic",
             channel=channel,
             access_level=AccessLevel.PUBLIC,
         )
+        ChannelMembership.objects.create(channel=channel, user=self.third_user)
 
         message = create_media_message(
             self.third_user,
@@ -850,6 +880,26 @@ class MediaMessageCreationServiceTests(PrivateMediaTestMixin, TestCase):
         self.assertEqual(message.chat, topic)
         self.assertEqual(message.sender, self.third_user)
         self.assert_private_file_exists(message.file)
+
+    def test_channel_media_switch_blocks_members_but_not_admins(self):
+        channel = Channel.objects.create(name="Quiet channel", owner=self.owner)
+        topic = Topic.objects.create(name="Topic", channel=channel)
+        ChannelMembership.objects.create(channel=channel, user=self.third_user)
+
+        with self.assertRaises(PermissionDenied):
+            create_media_message(
+                self.third_user,
+                topic,
+                self.upload("blocked.txt", b"blocked", "text/plain"),
+            )
+        self.assert_no_messages_files_or_private_uploads()
+
+        message = create_media_message(
+            self.owner,
+            topic,
+            self.upload("allowed.txt", b"allowed", "text/plain"),
+        )
+        self.assertEqual(message.sender, self.owner)
 
     def test_missing_file_is_rejected(self):
         pv = self.create_authorized_pv()

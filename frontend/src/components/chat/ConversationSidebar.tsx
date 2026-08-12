@@ -1,17 +1,28 @@
-import { ChevronRight, MessageCircle, Plus, Users } from "lucide-react";
-import { motion } from "motion/react";
+import {
+  ChevronRight,
+  Compass,
+  Hash,
+  Lock,
+  MessageCircle,
+  Plus,
+  Radio,
+  Users,
+} from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { AnimatedListItem, AnimatedListPresence } from "@/components/motion/AnimatedList";
 import { CountUp } from "@/components/motion/CountUp";
-import { springTransition } from "@/components/motion/transitions";
+import { overlayTransition, springTransition } from "@/components/motion/transitions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { initialsFor, personDisplayName } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
+  ChannelDetail,
   ConversationTab,
   DirectChat,
   GroupConversation,
@@ -22,22 +33,29 @@ const PANEL_ID = "conversation-list-panel";
 type ConversationSidebarProps = {
   privateChats: DirectChat[];
   groups: GroupConversation[];
+  channels: ChannelDetail[];
   activeTab: ConversationTab;
   onTabChange: (tab: ConversationTab) => void;
+  /** The open chat — a direct chat, a group, or a topic. */
   selectedChatId: number | null;
+  /** The open channel overview, when the main pane is showing one. */
+  selectedChannelId: number | null;
   isLoading?: boolean;
   error?: string;
   onCreateGroup: () => void;
+  onCreateChannel: () => void;
 };
 
-/** Row shell shared by direct chats and groups. */
+/** Row shell shared by direct chats, groups and topics. */
 function ConversationRow({
   to,
   isActive,
+  className,
   children,
 }: {
   to: string;
   isActive: boolean;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -51,7 +69,8 @@ function ConversationRow({
         "flex items-center gap-3 overflow-hidden rounded-2xl border px-3 py-2.5 transition-colors",
         isActive
           ? "border-primary/40 bg-primary/10"
-          : "border-transparent hover:border-border hover:bg-white/[0.05]"
+          : "border-transparent hover:border-border hover:bg-white/[0.05]",
+        className
       )}
     >
       {children}
@@ -59,16 +78,177 @@ function ConversationRow({
   );
 }
 
+/**
+ * One channel and, when opened, the topics inside it.
+ *
+ * The channel itself is never a chat, so its row leads to the channel's own
+ * page; the topics under it are the things you can actually talk in. Both are
+ * reachable without leaving the list, which is the point of the accordion —
+ * moving between two topics of the same channel is one click, not three.
+ */
+function ChannelRow({
+  channel,
+  isExpanded,
+  onToggle,
+  isChannelOpen,
+  selectedChatId,
+}: {
+  channel: ChannelDetail;
+  isExpanded: boolean;
+  onToggle: () => void;
+  isChannelOpen: boolean;
+  selectedChatId: number | null;
+}) {
+  const topicsLabel = `${channel.topic_count} ${channel.topic_count === 1 ? "topic" : "topics"}`;
+  const membersLabel = `${channel.member_count} ${channel.member_count === 1 ? "member" : "members"}`;
+
+  return (
+    <div className="grid gap-1">
+      <div
+        className={cn(
+          "flex items-center gap-1 overflow-hidden rounded-2xl border transition-colors",
+          isChannelOpen
+            ? "border-primary/40 bg-primary/10"
+            : "border-transparent hover:border-border hover:bg-white/[0.05]"
+        )}
+      >
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={isExpanded}
+          aria-label={
+            isExpanded
+              ? `Hide topics in ${channel.name}`
+              : `Show topics in ${channel.name}`
+          }
+          className="grid size-8 shrink-0 place-items-center rounded-xl text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
+        >
+          <motion.span
+            animate={{ rotate: isExpanded ? 90 : 0 }}
+            transition={springTransition}
+            className="grid place-items-center"
+          >
+            <ChevronRight className="size-4" aria-hidden="true" />
+          </motion.span>
+        </button>
+
+        <Link
+          to={`/channels/${channel.id}`}
+          aria-current={isChannelOpen ? "page" : undefined}
+          className="flex min-w-0 flex-1 items-center gap-3 py-2 pr-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+        >
+          <Avatar className="size-9 shrink-0 border border-border">
+            {channel.avatar_url ? (
+              <AvatarImage src={channel.avatar_url} alt={channel.name} />
+            ) : null}
+            <AvatarFallback className="bg-brand-gradient text-white">
+              <Radio className="size-4" aria-hidden="true" />
+            </AvatarFallback>
+          </Avatar>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <p className="truncate font-medium text-foreground">
+                {channel.name}
+              </p>
+              {channel.access_level === "private" ? (
+                <Lock
+                  className="size-3 shrink-0 text-muted-foreground/70"
+                  aria-label="Private channel"
+                />
+              ) : null}
+              {channel.is_owner ? (
+                <Badge variant="secondary" className="shrink-0">
+                  Owner
+                </Badge>
+              ) : channel.is_admin ? (
+                <Badge variant="secondary" className="shrink-0">
+                  Admin
+                </Badge>
+              ) : null}
+            </div>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {topicsLabel} · {membersLabel}
+            </p>
+          </div>
+        </Link>
+      </div>
+
+      <AnimatePresence initial={false}>
+        {isExpanded ? (
+          <motion.div
+            key="topics"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={overlayTransition}
+            className="overflow-hidden"
+          >
+            {/* The rule down the left is what makes these read as *inside* the
+                channel rather than as siblings of it. */}
+            <ul className="ml-4 grid gap-1 border-l border-border pl-3">
+              {channel.topics.length === 0 ? (
+                <li className="px-2 py-2 text-xs text-muted-foreground/70">
+                  No topics yet.
+                </li>
+              ) : (
+                channel.topics.map((topic) => {
+                  const isActive = selectedChatId === topic.id;
+                  return (
+                    <li key={topic.id} className="min-w-0">
+                      <ConversationRow
+                        to={`/chats/${topic.id}`}
+                        isActive={isActive}
+                        className="gap-2 px-2.5 py-2"
+                      >
+                        <Hash
+                          className={cn(
+                            "size-4 shrink-0",
+                            isActive ? "text-primary" : "text-muted-foreground/70"
+                          )}
+                          aria-hidden="true"
+                        />
+                        <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                          {topic.name}
+                        </span>
+                        {!topic.allow_member_messages ? (
+                          <Lock
+                            className="size-3 shrink-0 text-muted-foreground/70"
+                            aria-label="Only admins can post"
+                          />
+                        ) : null}
+                      </ConversationRow>
+                    </li>
+                  );
+                })
+              )}
+            </ul>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 function ConversationSidebar({
   privateChats,
   groups,
+  channels,
   activeTab,
   onTabChange,
   selectedChatId,
+  selectedChannelId,
   isLoading = false,
   error,
   onCreateGroup,
+  onCreateChannel,
 }: ConversationSidebarProps) {
+  // Which channels are open, as an explicit set. `null` means "nobody has
+  // touched this yet", which is what lets the open conversation decide.
+  const [expandedChannelIds, setExpandedChannelIds] = useState<Set<number> | null>(
+    null
+  );
+
   const tabs = [
     {
       key: "private" as const,
@@ -82,14 +262,72 @@ function ConversationSidebar({
       icon: Users,
       count: groups.length,
     },
+    {
+      key: "channels" as const,
+      label: "Channels",
+      icon: Radio,
+      count: channels.length,
+    },
   ];
-  const isEmpty = (activeTab === "private" ? privateChats : groups).length === 0;
+
+  // The channel holding the open topic, or the one whose page is showing.
+  const activeChannelId =
+    channels.find((channel) =>
+      channel.topics.some((topic) => topic.id === selectedChatId)
+    )?.id ?? selectedChannelId;
+
+  function isChannelExpanded(channelId: number) {
+    // Until the reader expands something themselves, the channel they are
+    // looking at is the one that stands open.
+    if (expandedChannelIds === null) return channelId === activeChannelId;
+    return expandedChannelIds.has(channelId);
+  }
+
+  function toggleChannel(channelId: number) {
+    setExpandedChannelIds((current) => {
+      const next = new Set(
+        current ?? (activeChannelId !== null ? [activeChannelId] : [])
+      );
+      if (next.has(channelId)) {
+        next.delete(channelId);
+      } else {
+        next.add(channelId);
+      }
+      return next;
+    });
+  }
+
+  const listForTab =
+    activeTab === "private" ? privateChats : activeTab === "groups" ? groups : channels;
+  const isEmpty = listForTab.length === 0;
+
   // "New" means whatever the visible tab is a list of: a direct chat starts by
-  // finding a person, a group starts by describing one.
-  const isPrivateTab = activeTab === "private";
-  const newConversationLabel = isPrivateTab
-    ? "Find someone to message"
-    : "Create a new group";
+  // finding a person, a group or channel starts by describing one.
+  type NewConversationAction =
+    | { kind: "link"; to: string; label: string; title: string }
+    | { kind: "dialog"; onClick: () => void; label: string; title: string };
+
+  const newConversation: NewConversationAction =
+    activeTab === "private"
+      ? {
+          kind: "link",
+          to: "/search",
+          label: "Find someone to message",
+          title: "New direct chat",
+        }
+      : activeTab === "groups"
+        ? {
+            kind: "dialog",
+            onClick: onCreateGroup,
+            label: "Create a new group",
+            title: "New group",
+          }
+        : {
+            kind: "dialog",
+            onClick: onCreateChannel,
+            label: "Create a new channel",
+            title: "New channel",
+          };
 
   return (
     <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card/50 shadow-2xl shadow-black/30 backdrop-blur-sm">
@@ -102,15 +340,15 @@ function ConversationSidebar({
             Inbox
           </h2>
         </div>
-        {isPrivateTab ? (
+        {newConversation.kind === "link" ? (
           <Button
             asChild
             variant="outline"
             size="icon"
             className="size-9 shrink-0"
-            title="New direct chat"
+            title={newConversation.title}
           >
-            <Link to="/search" aria-label={newConversationLabel}>
+            <Link to={newConversation.to} aria-label={newConversation.label}>
               <Plus className="size-4" aria-hidden="true" />
             </Link>
           </Button>
@@ -120,9 +358,9 @@ function ConversationSidebar({
             variant="outline"
             size="icon"
             className="size-9 shrink-0"
-            aria-label={newConversationLabel}
-            title="New group"
-            onClick={onCreateGroup}
+            aria-label={newConversation.label}
+            title={newConversation.title}
+            onClick={newConversation.onClick}
           >
             <Plus className="size-4" aria-hidden="true" />
           </Button>
@@ -132,7 +370,7 @@ function ConversationSidebar({
       <div className="shrink-0 border-b border-border p-3">
         <div
           role="tablist"
-          className="grid grid-cols-2 gap-1 rounded-2xl border border-border bg-white/[0.03] p-1"
+          className="grid grid-cols-3 gap-1 rounded-2xl border border-border bg-white/[0.03] p-1"
         >
           {tabs.map(({ key, label, icon: Icon, count }) => {
             const isActive = activeTab === key;
@@ -146,7 +384,7 @@ function ConversationSidebar({
                 aria-controls={PANEL_ID}
                 onClick={() => onTabChange(key)}
                 className={cn(
-                  "relative inline-flex items-center justify-center gap-2 rounded-xl px-2 py-2 text-sm font-medium transition-colors",
+                  "relative inline-flex items-center justify-center gap-1.5 rounded-xl px-1.5 py-2 text-sm font-medium transition-colors",
                   isActive
                     ? "text-foreground"
                     : "text-muted-foreground hover:text-foreground"
@@ -160,8 +398,10 @@ function ConversationSidebar({
                     aria-hidden="true"
                   />
                 ) : null}
-                <Icon className="relative size-4" aria-hidden="true" />
-                <span className="relative">{label}</span>
+                <Icon className="relative size-4 shrink-0" aria-hidden="true" />
+                {/* The label steps aside below `sm` so three tabs and their
+                    counts still fit a phone-width sidebar. */}
+                <span className="relative hidden truncate sm:inline">{label}</span>
                 <Badge
                   variant={isActive ? "default" : "secondary"}
                   className={cn(
@@ -199,41 +439,7 @@ function ConversationSidebar({
             ))}
           </div>
         ) : isEmpty ? (
-          <div className="grid min-h-56 place-items-center rounded-2xl border border-dashed border-border bg-white/[0.02] px-4 text-center">
-            <div className="max-w-xs">
-              <span className="mx-auto mb-3 grid size-11 place-items-center rounded-2xl bg-primary/10 text-primary">
-                {activeTab === "private" ? (
-                  <MessageCircle className="size-5" />
-                ) : (
-                  <Users className="size-5" />
-                )}
-              </span>
-              <p className="font-medium text-foreground">
-                {activeTab === "private" ? "No direct chats yet" : "No groups yet"}
-              </p>
-              <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                {activeTab === "private"
-                  ? "Search for people and start a direct message."
-                  : "Groups you join will appear here."}
-              </p>
-              {activeTab === "private" ? (
-                <Button asChild variant="outline" size="sm" className="mt-4">
-                  <Link to="/search">Search people</Link>
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="mt-4"
-                  onClick={onCreateGroup}
-                >
-                  <Plus className="size-4" aria-hidden="true" />
-                  New group
-                </Button>
-              )}
-            </div>
-          </div>
+          <EmptyTab activeTab={activeTab} onCreateGroup={onCreateGroup} onCreateChannel={onCreateChannel} />
         ) : activeTab === "private" ? (
           <ul className="grid gap-1.5">
             <AnimatedListPresence>
@@ -276,7 +482,7 @@ function ConversationSidebar({
               })}
             </AnimatedListPresence>
           </ul>
-        ) : (
+        ) : activeTab === "groups" ? (
           <ul className="grid gap-1.5">
             <AnimatedListPresence>
               {groups.map((group, index) => {
@@ -325,9 +531,92 @@ function ConversationSidebar({
               })}
             </AnimatedListPresence>
           </ul>
+        ) : (
+          <ul className="grid gap-1.5">
+            <AnimatedListPresence>
+              {channels.map((channel, index) => (
+                <AnimatedListItem key={channel.id} index={index} className="min-w-0">
+                  <ChannelRow
+                    channel={channel}
+                    isExpanded={isChannelExpanded(channel.id)}
+                    onToggle={() => toggleChannel(channel.id)}
+                    isChannelOpen={selectedChannelId === channel.id}
+                    selectedChatId={selectedChatId}
+                  />
+                </AnimatedListItem>
+              ))}
+            </AnimatedListPresence>
+          </ul>
         )}
       </div>
     </aside>
+  );
+}
+
+function EmptyTab({
+  activeTab,
+  onCreateGroup,
+  onCreateChannel,
+}: {
+  activeTab: ConversationTab;
+  onCreateGroup: () => void;
+  onCreateChannel: () => void;
+}) {
+  const copy = {
+    private: {
+      icon: MessageCircle,
+      title: "No direct chats yet",
+      body: "Search for people and start a direct message.",
+    },
+    groups: {
+      icon: Users,
+      title: "No groups yet",
+      body: "Groups you create or join will appear here.",
+    },
+    channels: {
+      icon: Radio,
+      title: "No channels yet",
+      body: "Create one, or browse the public channels anyone can join.",
+    },
+  }[activeTab];
+  const Icon = copy.icon;
+
+  return (
+    <div className="grid min-h-56 place-items-center rounded-2xl border border-dashed border-border bg-white/[0.02] px-4 text-center">
+      <div className="max-w-xs">
+        <span className="mx-auto mb-3 grid size-11 place-items-center rounded-2xl bg-primary/10 text-primary">
+          <Icon className="size-5" />
+        </span>
+        <p className="font-medium text-foreground">{copy.title}</p>
+        <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{copy.body}</p>
+
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          {activeTab === "private" ? (
+            <Button asChild variant="outline" size="sm">
+              <Link to="/search">Search people</Link>
+            </Button>
+          ) : activeTab === "groups" ? (
+            <Button type="button" variant="outline" size="sm" onClick={onCreateGroup}>
+              <Plus className="size-4" aria-hidden="true" />
+              New group
+            </Button>
+          ) : (
+            <>
+              <Button type="button" size="sm" onClick={onCreateChannel}>
+                <Plus className="size-4" aria-hidden="true" />
+                New channel
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link to="/search?tab=channels">
+                  <Compass className="size-4" aria-hidden="true" />
+                  Explore
+                </Link>
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
