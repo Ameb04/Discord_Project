@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from accounts.serializers import PublicUserSerializer
 
-from .models import NormalMessage
+from .models import NormalMessage, ScheduledMessage
 
 
 class TextMessageCreateSerializer(serializers.Serializer):
@@ -67,6 +67,25 @@ class MessageSearchResultSerializer(serializers.ModelSerializer):
         if len(content) <= 180:
             return content
         return f"{content[:177].rstrip()}..."
+
+
+class ScheduledTextMessageCreateSerializer(serializers.Serializer):
+    content = serializers.CharField(allow_blank=True, trim_whitespace=False)
+    scheduled_at = serializers.DateTimeField()
+
+
+class ScheduledMessageSerializer(serializers.ModelSerializer):
+    chat = serializers.PrimaryKeyRelatedField(read_only=True)
+    sender = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ScheduledMessage
+        fields = ("id", "chat", "sender", "content", "created_at", "scheduled_at")
+
+    def get_sender(self, obj):
+        if obj.sender is None:
+            return None
+        return PublicUserSerializer(obj.sender, context=self.context).data
 from rest_framework import serializers
 
 from accounts.serializers import PublicUserSerializer

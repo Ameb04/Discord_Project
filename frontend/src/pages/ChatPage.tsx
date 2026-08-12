@@ -562,6 +562,7 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
         <MessageComposer
           chatId={chatId}
           disabled={isLoading || Boolean(error)}
+          conversationLabel={title ?? fallbackTitle}
           onMessageSent={handleMessageSent}
         />
       )}

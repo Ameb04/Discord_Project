@@ -42,6 +42,15 @@ export type ChatMessage = {
   attachment: AttachmentMetadata | null;
 };
 
+export type ScheduledChatMessage = {
+  id: number;
+  chat: number;
+  sender: PublicUser | null;
+  content: string;
+  created_at: string;
+  scheduled_at: string;
+};
+
 export type ChatHistoryResponse = {
   results: ChatMessage[];
   count: number;

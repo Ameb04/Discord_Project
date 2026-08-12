@@ -16,10 +16,13 @@ from .serializers import (
     MediaMessageCreateSerializer,
     MessageSearchResultSerializer,
     NormalMessageSerializer,
+    ScheduledMessageSerializer,
+    ScheduledTextMessageCreateSerializer,
     TextMessageCreateSerializer,
 )
 from .services import (
     create_media_message,
+    create_scheduled_text_message,
     create_text_message,
     get_private_storage,
 )
@@ -165,6 +168,32 @@ class MessageHistoryView(APIView):
             }
         )
         return Response(payload)
+
+
+class ScheduledMessageCreateView(APIView):
+    """POST /api/chats/<chat_id>/messages/scheduled/."""
+
+    def post(self, request, chat_id):
+        chat = get_object_or_404(Chat, pk=chat_id)
+        request_serializer = ScheduledTextMessageCreateSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+
+        try:
+            message = create_scheduled_text_message(
+                request.user,
+                chat,
+                request_serializer.validated_data["content"],
+                request_serializer.validated_data["scheduled_at"],
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(_validation_error_detail(exc)) from exc
+        except DjangoPermissionDenied as exc:
+            raise PermissionDenied(str(exc)) from exc
+
+        response_serializer = ScheduledMessageSerializer(
+            message, context={"request": request}
+        )
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 
 class MessageSearchView(APIView):

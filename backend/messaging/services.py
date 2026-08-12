@@ -1,15 +1,17 @@
+from datetime import datetime, timezone as datetime_timezone
 from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import FileSystemStorage, storages
 from django.db import transaction
+from django.utils import timezone
 from django.utils.text import get_valid_filename
 
 from chats.permissions import can_send_to_chat
 from core.models import File
 
-from .models import NormalMessage
+from .models import NormalMessage, ScheduledMessage
 from .realtime import broadcast_message_after_commit
 
 
@@ -42,6 +44,24 @@ def create_text_message(sender, chat, content):
     )
     broadcast_message_after_commit(message)
     return message
+
+
+def create_scheduled_text_message(sender, chat, content, scheduled_at):
+    """Store a text message for future delivery without sending it yet."""
+    _validate_sender(sender)
+    if chat is None:
+        raise ValidationError({"chat": "Chat is required."})
+    if not can_send_to_chat(sender, chat):
+        raise PermissionDenied("You do not have permission to send to this chat.")
+
+    normalized_content = _validate_text_content(content)
+    normalized_scheduled_at = _validate_future_datetime(scheduled_at)
+    return ScheduledMessage.objects.create(
+        sender=sender,
+        chat=chat,
+        content=normalized_content,
+        scheduled_at=normalized_scheduled_at,
+    )
 
 
 def create_media_message(sender, chat, uploaded_file, content=""):
@@ -106,6 +126,18 @@ def _validate_optional_content(content):
     if not isinstance(content, str):
         raise ValidationError({"content": "Message content must be text."})
     return content.strip()
+
+
+def _validate_future_datetime(value):
+    if not isinstance(value, datetime) or not timezone.is_aware(value):
+        raise ValidationError(
+            {"scheduled_at": "Delivery time must include a timezone."}
+        )
+    if value <= timezone.now():
+        raise ValidationError(
+            {"scheduled_at": "Delivery time must be in the future."}
+        )
+    return value.astimezone(datetime_timezone.utc)
 
 
 def _validate_uploaded_file(uploaded_file):

@@ -6,6 +6,7 @@ import type {
   ChatSearchResponse,
   DirectChat,
   ConversationIndex,
+  ScheduledChatMessage,
 } from "../types/chat";
 
 type MessageHistoryParams = {
@@ -91,6 +92,21 @@ export async function sendMediaMessage(
     formData,
     {
       headers: { "Content-Type": "multipart/form-data" },
+    }
+  );
+  return response.data;
+}
+
+export async function scheduleTextMessage(
+  chatId: number,
+  content: string,
+  scheduledAt: string
+): Promise<ScheduledChatMessage> {
+  const response = await client.post<ScheduledChatMessage>(
+    `/api/chats/${chatId}/messages/scheduled/`,
+    {
+      content,
+      scheduled_at: scheduledAt,
     }
   );
   return response.data;

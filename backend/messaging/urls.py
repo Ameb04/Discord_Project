@@ -7,6 +7,7 @@ from .views import (
     MessageHistoryView,
     MessageListCreateView,
     MessageSearchView,
+    ScheduledMessageCreateView,
 )
 
 app_name = "messaging"
@@ -20,6 +21,11 @@ chat_message_patterns = [
         name="message-context",
     ),
     path("media/", MediaMessageCreateView.as_view(), name="media-message"),
+    path(
+        "scheduled/",
+        ScheduledMessageCreateView.as_view(),
+        name="scheduled-message",
+    ),
     path("", MessageListCreateView.as_view(), name="message-list"),
 ]
 
