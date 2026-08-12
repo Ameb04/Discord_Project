@@ -11,11 +11,12 @@ from rest_framework.views import APIView
 from chats.models import Chat
 from chats.permissions import can_access_chat
 
-from .models import Message, NormalMessage
+from .models import Message, NormalMessage, ScheduledMessage
 from .serializers import (
     MediaMessageCreateSerializer,
     MessageSearchResultSerializer,
     NormalMessageSerializer,
+    ScheduledMessageListSerializer,
     ScheduledMessageSerializer,
     ScheduledTextMessageCreateSerializer,
     TextMessageCreateSerializer,
@@ -194,6 +195,23 @@ class ScheduledMessageCreateView(APIView):
             message, context={"request": request}
         )
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ScheduledMessageListView(APIView):
+    """GET /api/messages/scheduled/."""
+
+    def get(self, request):
+        messages = (
+            ScheduledMessage.objects.filter(sender=request.user)
+            .select_related(
+                "chat", "chat__pv", "chat__group", "chat__topic__channel"
+            )
+            .order_by("scheduled_at", "pk")
+        )
+        serializer = ScheduledMessageListSerializer(
+            messages, many=True, context={"request": request}
+        )
+        return Response(serializer.data)
 
 
 class MessageSearchView(APIView):

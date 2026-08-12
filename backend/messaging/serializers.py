@@ -1,3 +1,4 @@
+from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
 
 from accounts.serializers import PublicUserSerializer
@@ -64,6 +65,62 @@ class MessageSearchResultSerializer(serializers.ModelSerializer):
         content = (obj.content or "").strip()
         if not content:
             return "(empty message)"
+        if len(content) <= 180:
+            return content
+        return f"{content[:177].rstrip()}..."
+
+
+class ScheduledMessageListSerializer(serializers.ModelSerializer):
+    destination = serializers.SerializerMethodField()
+    preview = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ScheduledMessage
+        fields = ("id", "destination", "preview", "scheduled_at", "status")
+
+    def get_destination(self, obj):
+        chat = obj.chat
+
+        try:
+            direct_chat = chat.pv
+        except ObjectDoesNotExist:
+            direct_chat = None
+        if direct_chat is not None:
+            other_user = direct_chat.members.exclude(pk=obj.sender_id).first()
+            if other_user is not None:
+                full_name = f"{other_user.first_name} {other_user.last_name}".strip()
+                name = full_name or other_user.phone_number
+            else:
+                name = chat.name or f"Direct chat #{chat.pk}"
+            return {"id": chat.pk, "type": "direct", "name": name}
+
+        try:
+            group = chat.group
+        except ObjectDoesNotExist:
+            group = None
+        if group is not None:
+            return {
+                "id": chat.pk,
+                "type": "group",
+                "name": group.name or f"Group #{chat.pk}",
+            }
+
+        try:
+            topic = chat.topic
+        except ObjectDoesNotExist:
+            topic = None
+        if topic is not None:
+            topic_name = topic.name or topic.channel.name
+            return {"id": chat.pk, "type": "topic", "name": topic_name}
+
+        return {
+            "id": chat.pk,
+            "type": "chat",
+            "name": chat.name or f"Chat #{chat.pk}",
+        }
+
+    def get_preview(self, obj):
+        content = (obj.content or "").strip()
         if len(content) <= 180:
             return content
         return f"{content[:177].rstrip()}..."

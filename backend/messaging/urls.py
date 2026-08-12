@@ -8,6 +8,7 @@ from .views import (
     MessageListCreateView,
     MessageSearchView,
     ScheduledMessageCreateView,
+    ScheduledMessageListView,
 )
 
 app_name = "messaging"
@@ -30,6 +31,11 @@ chat_message_patterns = [
 ]
 
 urlpatterns = [
+    path(
+        "scheduled/",
+        ScheduledMessageListView.as_view(),
+        name="scheduled-message-list",
+    ),
     path(
         "<int:message_id>/attachment/",
         AttachmentDownloadView.as_view(),

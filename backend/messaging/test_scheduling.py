@@ -4,6 +4,7 @@ from unittest import mock
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.test import APIClient
 
 from accounts.authentication import APP_USER_SESSION_KEY
@@ -278,3 +279,112 @@ class ScheduledMessageDeliveryTests(TestCase):
 
         self.assertEqual(count, 1)
         delay.assert_called_once_with(due.pk)
+
+
+class ScheduledMessageListTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            phone_number="7000",
+            password="password",
+            first_name="Schedule",
+            last_name="Owner",
+        )
+        self.recipient = User.objects.create_user(
+            phone_number="8000",
+            password="password",
+            first_name="Direct",
+            last_name="Recipient",
+        )
+        self.other_user = User.objects.create_user(
+            phone_number="9000", password="password"
+        )
+        self.chat = Pv.objects.create(name="Owner direct chat")
+        PvMembership.objects.create(pv=self.chat, user=self.owner)
+        PvMembership.objects.create(pv=self.chat, user=self.recipient)
+
+    def authenticated_client(self, user):
+        client = APIClient()
+        session = client.session
+        session[APP_USER_SESSION_KEY] = user.pk
+        session.save()
+        return client
+
+    def create_message(
+        self,
+        *,
+        sender=None,
+        chat=None,
+        status=ScheduledMessageStatus.PENDING,
+    ):
+        return ScheduledMessage.objects.create(
+            sender=sender or self.owner,
+            chat=chat or self.chat,
+            content="A scheduled message with enough detail",
+            scheduled_at=timezone.now() + timedelta(hours=2),
+            status=status,
+        )
+
+    def test_user_sees_only_their_own_scheduled_messages_with_required_fields(self):
+        own_messages = [
+            self.create_message(status=ScheduledMessageStatus.PENDING),
+            self.create_message(status=ScheduledMessageStatus.SENT),
+            self.create_message(status=ScheduledMessageStatus.FAILED),
+        ]
+        other_chat = Pv.objects.create(name="Other direct chat")
+        PvMembership.objects.create(pv=other_chat, user=self.other_user)
+        PvMembership.objects.create(pv=other_chat, user=self.recipient)
+        self.create_message(sender=self.other_user, chat=other_chat)
+
+        response = self.authenticated_client(self.owner).get(
+            "/api/messages/scheduled/",
+            {"user": self.other_user.pk},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {item["id"] for item in response.data},
+            {message.pk for message in own_messages},
+        )
+        self.assertEqual(
+            {item["status"] for item in response.data},
+            {
+                ScheduledMessageStatus.PENDING,
+                ScheduledMessageStatus.SENT,
+                ScheduledMessageStatus.FAILED,
+            },
+        )
+        for item in response.data:
+            self.assertEqual(
+                set(item),
+                {"id", "destination", "preview", "scheduled_at", "status"},
+            )
+            self.assertEqual(
+                item["destination"],
+                {
+                    "id": self.chat.pk,
+                    "type": "direct",
+                    "name": "Direct Recipient",
+                },
+            )
+            self.assertEqual(item["preview"], "A scheduled message with enough detail")
+            represented_time = parse_datetime(item["scheduled_at"])
+            self.assertIsNotNone(represented_time)
+            self.assertTrue(timezone.is_aware(represented_time))
+
+    def test_preview_is_bounded(self):
+        message = self.create_message()
+        message.content = "x" * 200
+        message.save(update_fields=["content"])
+
+        response = self.authenticated_client(self.owner).get(
+            "/api/messages/scheduled/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data[0]["preview"]), 180)
+        self.assertTrue(response.data[0]["preview"].endswith("..."))
+
+    def test_endpoint_requires_authentication(self):
+        response = APIClient().get("/api/messages/scheduled/")
+
+        self.assertEqual(response.status_code, 403)

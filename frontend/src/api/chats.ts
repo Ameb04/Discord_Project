@@ -7,6 +7,7 @@ import type {
   DirectChat,
   ConversationIndex,
   ScheduledChatMessage,
+  ScheduledMessageSummary,
 } from "../types/chat";
 
 type MessageHistoryParams = {
@@ -108,6 +109,13 @@ export async function scheduleTextMessage(
       content,
       scheduled_at: scheduledAt,
     }
+  );
+  return response.data;
+}
+
+export async function getScheduledMessages(): Promise<ScheduledMessageSummary[]> {
+  const response = await client.get<ScheduledMessageSummary[]>(
+    "/api/messages/scheduled/"
   );
   return response.data;
 }
