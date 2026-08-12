@@ -12,7 +12,11 @@ from accounts.models import User
 from chats.models import Pv, PvMembership
 
 from .models import NormalMessage, ScheduledMessage, ScheduledMessageStatus
-from .services import create_scheduled_text_message, deliver_scheduled_message
+from .services import (
+    cancel_scheduled_message,
+    create_scheduled_text_message,
+    deliver_scheduled_message,
+)
 from .tasks import dispatch_due_scheduled_messages
 
 
@@ -388,3 +392,126 @@ class ScheduledMessageListTests(TestCase):
         response = APIClient().get("/api/messages/scheduled/")
 
         self.assertEqual(response.status_code, 403)
+
+
+class ScheduledMessageCancellationTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            phone_number="11000", password="password"
+        )
+        self.recipient = User.objects.create_user(
+            phone_number="12000", password="password"
+        )
+        self.other_user = User.objects.create_user(
+            phone_number="13000", password="password"
+        )
+        self.chat = Pv.objects.create(name="Cancellation chat")
+        PvMembership.objects.create(pv=self.chat, user=self.owner)
+        PvMembership.objects.create(pv=self.chat, user=self.recipient)
+
+    def authenticated_client(self, user):
+        client = APIClient()
+        session = client.session
+        session[APP_USER_SESSION_KEY] = user.pk
+        session.save()
+        return client
+
+    def create_message(self, *, status=ScheduledMessageStatus.PENDING, due=False):
+        scheduled_at = timezone.now() + (
+            -timedelta(minutes=1) if due else timedelta(hours=1)
+        )
+        return ScheduledMessage.objects.create(
+            sender=self.owner,
+            chat=self.chat,
+            content="Message to cancel",
+            scheduled_at=scheduled_at,
+            status=status,
+        )
+
+    def cancel_url(self, message):
+        return f"/api/messages/scheduled/{message.pk}/"
+
+    def test_owner_can_cancel_pending_message(self):
+        message = self.create_message()
+
+        response = self.authenticated_client(self.owner).delete(
+            self.cancel_url(message)
+        )
+        message.refresh_from_db()
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(message.status, ScheduledMessageStatus.CANCELLED)
+        self.assertIsNotNone(message.processed_at)
+
+    def test_other_user_cannot_cancel_or_discover_message(self):
+        message = self.create_message()
+
+        response = self.authenticated_client(self.other_user).delete(
+            self.cancel_url(message)
+        )
+        message.refresh_from_db()
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(message.status, ScheduledMessageStatus.PENDING)
+
+    def test_sent_and_failed_messages_cannot_be_cancelled(self):
+        for lifecycle_status in (
+            ScheduledMessageStatus.SENT,
+            ScheduledMessageStatus.FAILED,
+        ):
+            with self.subTest(status=lifecycle_status):
+                message = self.create_message(status=lifecycle_status)
+
+                response = self.authenticated_client(self.owner).delete(
+                    self.cancel_url(message)
+                )
+
+                self.assertEqual(response.status_code, 400)
+                message.refresh_from_db()
+                self.assertEqual(message.status, lifecycle_status)
+
+    def test_cancelled_due_message_is_never_delivered(self):
+        message = self.create_message(due=True)
+
+        cancelled = cancel_scheduled_message(self.owner, message.pk)
+        delivery_result = deliver_scheduled_message(message.pk)
+        message.refresh_from_db()
+
+        self.assertEqual(cancelled.status, ScheduledMessageStatus.CANCELLED)
+        self.assertEqual(delivery_result.status, ScheduledMessageStatus.CANCELLED)
+        self.assertEqual(message.status, ScheduledMessageStatus.CANCELLED)
+        self.assertFalse(NormalMessage.objects.exists())
+
+    def test_delivery_that_wins_first_cannot_be_cancelled(self):
+        message = self.create_message(due=True)
+        deliver_scheduled_message(message.pk)
+
+        response = self.authenticated_client(self.owner).delete(
+            self.cancel_url(message)
+        )
+        message.refresh_from_db()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(message.status, ScheduledMessageStatus.SENT)
+        self.assertEqual(NormalMessage.objects.count(), 1)
+
+    def test_cancelled_message_is_excluded_from_list(self):
+        cancelled = self.create_message()
+        visible = self.create_message()
+        cancel_scheduled_message(self.owner, cancelled.pk)
+
+        response = self.authenticated_client(self.owner).get(
+            "/api/messages/scheduled/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.data], [visible.pk])
+
+    def test_cancellation_requires_authentication(self):
+        message = self.create_message()
+
+        response = APIClient().delete(self.cancel_url(message))
+
+        self.assertEqual(response.status_code, 403)
+        message.refresh_from_db()
+        self.assertEqual(message.status, ScheduledMessageStatus.PENDING)

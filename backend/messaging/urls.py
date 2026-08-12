@@ -8,6 +8,7 @@ from .views import (
     MessageListCreateView,
     MessageSearchView,
     ScheduledMessageCreateView,
+    ScheduledMessageCancelView,
     ScheduledMessageListView,
 )
 
@@ -31,6 +32,11 @@ chat_message_patterns = [
 ]
 
 urlpatterns = [
+    path(
+        "scheduled/<int:message_id>/",
+        ScheduledMessageCancelView.as_view(),
+        name="scheduled-message-cancel",
+    ),
     path(
         "scheduled/",
         ScheduledMessageListView.as_view(),

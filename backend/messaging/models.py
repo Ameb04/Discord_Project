@@ -60,6 +60,7 @@ class ScheduledMessageStatus(models.TextChoices):
     PENDING = "pending", "Pending"
     SENT = "sent", "Sent"
     FAILED = "failed", "Failed"
+    CANCELLED = "cancelled", "Cancelled"
 
 
 class ScheduledMessage(Message):

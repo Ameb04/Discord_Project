@@ -11,7 +11,12 @@ from rest_framework.views import APIView
 from chats.models import Chat
 from chats.permissions import can_access_chat
 
-from .models import Message, NormalMessage, ScheduledMessage
+from .models import (
+    Message,
+    NormalMessage,
+    ScheduledMessage,
+    ScheduledMessageStatus,
+)
 from .serializers import (
     MediaMessageCreateSerializer,
     MessageSearchResultSerializer,
@@ -22,6 +27,7 @@ from .serializers import (
     TextMessageCreateSerializer,
 )
 from .services import (
+    cancel_scheduled_message,
     create_media_message,
     create_scheduled_text_message,
     create_text_message,
@@ -202,7 +208,9 @@ class ScheduledMessageListView(APIView):
 
     def get(self, request):
         messages = (
-            ScheduledMessage.objects.filter(sender=request.user)
+            ScheduledMessage.objects.filter(sender=request.user).exclude(
+                status=ScheduledMessageStatus.CANCELLED
+            )
             .select_related(
                 "chat", "chat__pv", "chat__group", "chat__topic__channel"
             )
@@ -212,6 +220,20 @@ class ScheduledMessageListView(APIView):
             messages, many=True, context={"request": request}
         )
         return Response(serializer.data)
+
+
+class ScheduledMessageCancelView(APIView):
+    """DELETE /api/messages/scheduled/<message_id>/."""
+
+    def delete(self, request, message_id):
+        try:
+            message = cancel_scheduled_message(request.user, message_id)
+        except DjangoValidationError as exc:
+            raise ValidationError(_validation_error_detail(exc)) from exc
+
+        if message is None:
+            raise NotFound("Scheduled message not found.")
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class MessageSearchView(APIView):

@@ -119,3 +119,7 @@ export async function getScheduledMessages(): Promise<ScheduledMessageSummary[]>
   );
   return response.data;
 }
+
+export async function cancelScheduledMessage(messageId: number): Promise<void> {
+  await client.delete(`/api/messages/scheduled/${messageId}/`);
+}

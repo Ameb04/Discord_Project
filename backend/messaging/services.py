@@ -112,6 +112,32 @@ def deliver_scheduled_message(scheduled_message_id, *, current_time=None):
         return scheduled_message
 
 
+def cancel_scheduled_message(sender, scheduled_message_id):
+    """Cancel one owned pending message while excluding the delivery worker."""
+    _validate_sender(sender)
+    with transaction.atomic():
+        try:
+            scheduled_message = ScheduledMessage.objects.select_for_update().get(
+                pk=scheduled_message_id,
+                sender=sender,
+            )
+        except ScheduledMessage.DoesNotExist:
+            return None
+
+        if scheduled_message.status != ScheduledMessageStatus.PENDING:
+            raise ValidationError(
+                {"status": "Only pending scheduled messages can be cancelled."}
+            )
+
+        scheduled_message.status = ScheduledMessageStatus.CANCELLED
+        scheduled_message.processed_at = timezone.now()
+        scheduled_message.failure_reason = ""
+        scheduled_message.save(
+            update_fields=("status", "processed_at", "failure_reason")
+        )
+        return scheduled_message
+
+
 def create_media_message(sender, chat, uploaded_file, content=""):
     """Create an immediate message with one privately stored attachment."""
     _validate_sender(sender)
