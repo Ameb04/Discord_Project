@@ -11,7 +11,7 @@ from django.utils.text import get_valid_filename
 from chats.permissions import can_send_to_chat
 from core.models import File
 
-from .models import NormalMessage, ScheduledMessage
+from .models import NormalMessage, ScheduledMessage, ScheduledMessageStatus
 from .realtime import broadcast_message_after_commit
 
 
@@ -62,6 +62,54 @@ def create_scheduled_text_message(sender, chat, content, scheduled_at):
         content=normalized_content,
         scheduled_at=normalized_scheduled_at,
     )
+
+
+def deliver_scheduled_message(scheduled_message_id, *, current_time=None):
+    """Deliver one due message exactly once, returning its locked record."""
+    effective_time = current_time or timezone.now()
+    with transaction.atomic():
+        try:
+            scheduled_message = (
+                ScheduledMessage.objects.select_for_update()
+                .select_related("chat")
+                .get(pk=scheduled_message_id)
+            )
+        except ScheduledMessage.DoesNotExist:
+            return None
+
+        if scheduled_message.status != ScheduledMessageStatus.PENDING:
+            return scheduled_message
+        if scheduled_message.scheduled_at > effective_time:
+            return scheduled_message
+
+        try:
+            delivered_message = create_text_message(
+                scheduled_message.sender,
+                scheduled_message.chat,
+                scheduled_message.content,
+            )
+        except (PermissionDenied, ValidationError) as exc:
+            scheduled_message.status = ScheduledMessageStatus.FAILED
+            scheduled_message.processed_at = effective_time
+            scheduled_message.failure_reason = _delivery_failure_reason(exc)
+            scheduled_message.save(
+                update_fields=("status", "processed_at", "failure_reason")
+            )
+            return scheduled_message
+
+        scheduled_message.status = ScheduledMessageStatus.SENT
+        scheduled_message.processed_at = effective_time
+        scheduled_message.failure_reason = ""
+        scheduled_message.delivered_message = delivered_message
+        scheduled_message.save(
+            update_fields=(
+                "status",
+                "processed_at",
+                "failure_reason",
+                "delivered_message",
+            )
+        )
+        return scheduled_message
 
 
 def create_media_message(sender, chat, uploaded_file, content=""):
@@ -138,6 +186,19 @@ def _validate_future_datetime(value):
             {"scheduled_at": "Delivery time must be in the future."}
         )
     return value.astimezone(datetime_timezone.utc)
+
+
+def _delivery_failure_reason(error):
+    if hasattr(error, "message_dict"):
+        messages = [
+            message
+            for values in error.message_dict.values()
+            for message in values
+        ]
+        return " ".join(messages)
+    if hasattr(error, "messages"):
+        return " ".join(error.messages)
+    return str(error)
 
 
 def _validate_uploaded_file(uploaded_file):

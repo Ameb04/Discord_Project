@@ -56,6 +56,12 @@ class NormalMessage(Message):
         db_table = "normal_messages"
 
 
+class ScheduledMessageStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    SENT = "sent", "Sent"
+    FAILED = "failed", "Failed"
+
+
 class ScheduledMessage(Message):
     """A message queued to be sent at a future time."""
 
@@ -68,6 +74,21 @@ class ScheduledMessage(Message):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     scheduled_at = models.DateTimeField()
+    status = models.CharField(
+        max_length=20,
+        choices=ScheduledMessageStatus.choices,
+        default=ScheduledMessageStatus.PENDING,
+        db_index=True,
+    )
+    processed_at = models.DateTimeField(null=True, blank=True)
+    failure_reason = models.TextField(blank=True)
+    delivered_message = models.OneToOneField(
+        NormalMessage,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="scheduled_source",
+    )
 
     class Meta:
         db_table = "scheduled_messages"
