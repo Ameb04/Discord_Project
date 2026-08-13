@@ -22,7 +22,7 @@ from chats.models import (
 from core.models import File
 
 from .models import Message, NormalMessage
-from .services import create_media_message, create_text_message
+from .services import create_media_message, create_text_message, edit_message
 
 
 class TextMessageCreationServiceTests(TestCase):
@@ -938,6 +938,158 @@ class MediaMessageCreationServiceTests(TestCase):
         if self.private_root.exists():
             stored_paths = [path for path in self.private_root.rglob("*") if path.is_file()]
             self.assertEqual(stored_paths, [])
+
+
+class EditMessageServiceTests(TestCase):
+    def setUp(self):
+        self.temp_dir = TemporaryDirectory()
+        self.private_root = Path(self.temp_dir.name) / "private"
+        self.public_root = Path(self.temp_dir.name) / "media"
+        self.settings_override = override_settings(
+            PRIVATE_MEDIA_ROOT=self.private_root,
+            MEDIA_ROOT=self.public_root,
+        )
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
+        self.addCleanup(self.temp_dir.cleanup)
+
+        self.owner = User.objects.create_user(
+            phone_number="1000", password="password"
+        )
+        self.member = User.objects.create_user(
+            phone_number="2000", password="password"
+        )
+        self.pv = Pv.objects.create(name="Direct chat")
+        PvMembership.objects.create(pv=self.pv, user=self.owner)
+        PvMembership.objects.create(pv=self.pv, user=self.member)
+
+    def test_attaching_file_to_text_only_message_marks_it_edited(self):
+        message = create_text_message(self.owner, self.pv, "no attachment yet")
+
+        edited = edit_message(
+            self.owner,
+            self.pv,
+            message.pk,
+            uploaded_file=self.upload("added.txt", b"added", "text/plain"),
+        )
+
+        edited.refresh_from_db()
+        self.assertTrue(edited.is_edited)
+        self.assertIsNotNone(edited.file)
+        self.assertEqual(edited.content, "no attachment yet")
+        self.assert_private_file_exists(edited.file)
+
+    def test_editing_content_marks_message_edited(self):
+        message = create_text_message(self.owner, self.pv, "before")
+
+        edited = edit_message(self.owner, self.pv, message.pk, content="  after  ")
+
+        edited.refresh_from_db()
+        self.assertTrue(edited.is_edited)
+        self.assertEqual(edited.content, "after")
+
+    def test_removing_attachment_marks_edited_and_deletes_stored_file(self):
+        message = create_media_message(
+            self.owner,
+            self.pv,
+            self.upload("drop.txt", b"drop", "text/plain"),
+            content="keep this text",
+        )
+        removed_path = self.private_path(message.file)
+
+        edited = edit_message(self.owner, self.pv, message.pk, remove_file=True)
+
+        edited.refresh_from_db()
+        self.assertTrue(edited.is_edited)
+        self.assertIsNone(edited.file)
+        self.assertEqual(File.objects.count(), 0)
+        self.assertFalse(removed_path.exists())
+
+    def test_replacing_attachment_swaps_the_stored_file(self):
+        message = create_media_message(
+            self.owner,
+            self.pv,
+            self.upload("old.txt", b"old", "text/plain"),
+        )
+        old_path = self.private_path(message.file)
+
+        edited = edit_message(
+            self.owner,
+            self.pv,
+            message.pk,
+            uploaded_file=self.upload("new.txt", b"new", "text/plain"),
+        )
+
+        edited.refresh_from_db()
+        self.assertTrue(edited.is_edited)
+        self.assertEqual(edited.file.name, "new.txt")
+        self.assertEqual(File.objects.count(), 1)
+        self.assertFalse(old_path.exists())
+        self.assertEqual(self.private_path(edited.file).read_bytes(), b"new")
+
+    def test_edit_without_any_change_is_a_no_op(self):
+        message = create_text_message(self.owner, self.pv, "unchanged")
+
+        edited = edit_message(self.owner, self.pv, message.pk, content="unchanged")
+
+        edited.refresh_from_db()
+        self.assertFalse(edited.is_edited)
+
+    def test_removing_file_from_message_without_one_is_a_no_op(self):
+        message = create_text_message(self.owner, self.pv, "text only")
+
+        edited = edit_message(self.owner, self.pv, message.pk, remove_file=True)
+
+        edited.refresh_from_db()
+        self.assertFalse(edited.is_edited)
+
+    def test_edit_cannot_leave_message_without_content_or_attachment(self):
+        message = create_text_message(self.owner, self.pv, "some text")
+
+        with self.assertRaises(ValidationError):
+            edit_message(self.owner, self.pv, message.pk, content="   ")
+
+        message.refresh_from_db()
+        self.assertEqual(message.content, "some text")
+        self.assertFalse(message.is_edited)
+
+    def test_clearing_content_is_allowed_when_an_attachment_remains(self):
+        message = create_media_message(
+            self.owner,
+            self.pv,
+            self.upload("kept.txt", b"kept", "text/plain"),
+            content="drop this caption",
+        )
+
+        edited = edit_message(self.owner, self.pv, message.pk, content="")
+
+        edited.refresh_from_db()
+        self.assertTrue(edited.is_edited)
+        self.assertEqual(edited.content, "")
+        self.assertIsNotNone(edited.file)
+
+    def test_user_cannot_edit_someone_elses_message(self):
+        message = create_text_message(self.owner, self.pv, "owned by owner")
+
+        with self.assertRaises(PermissionDenied):
+            edit_message(self.member, self.pv, message.pk, content="hijacked")
+
+        message.refresh_from_db()
+        self.assertEqual(message.content, "owned by owner")
+        self.assertFalse(message.is_edited)
+
+    def test_editing_unknown_message_is_rejected(self):
+        with self.assertRaises(ValidationError):
+            edit_message(self.owner, self.pv, 9999, content="nothing here")
+
+    def upload(self, name, content, content_type):
+        return SimpleUploadedFile(name, content, content_type=content_type)
+
+    def private_path(self, stored_file):
+        return (Path(settings.PRIVATE_MEDIA_ROOT) / stored_file.storage_path).resolve()
+
+    def assert_private_file_exists(self, stored_file):
+        self.assertTrue(self.private_path(stored_file).exists())
 
 
 class MessageHistorySearchApiTests(TestCase):
