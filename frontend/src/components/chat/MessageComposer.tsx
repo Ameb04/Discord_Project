@@ -6,7 +6,10 @@ import {
   sendTextMessage,
 } from "../../api/chats";
 import type { ChatMessage } from "../../types/chat";
+import { useNow } from "@/hooks/useNow";
+import { HOUR_MS, ceilToMinutes, formatDeliveryMoment } from "@/lib/datetime";
 import { Button } from "../ui/button";
+import { ScheduleMessagePanel } from "./ScheduleMessagePanel";
 
 type MessageComposerProps = {
   chatId: number;
@@ -59,10 +62,9 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function minimumLocalScheduleTime() {
-  const date = new Date(Date.now() + 60_000);
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+/** Opening the panel on a real value beats an empty field the user must fill. */
+function defaultScheduleTime() {
+  return ceilToMinutes(new Date(Date.now() + HOUR_MS), 5);
 }
 
 function MessageComposer({
@@ -72,18 +74,23 @@ function MessageComposer({
   onMessageSent,
 }: MessageComposerProps) {
   const fileInputId = useId();
-  const scheduleInputId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // A chosen delivery time goes stale on its own; re-check it on a clock rather
+  // than only when something else in the composer changes.
+  const now = useNow(15_000);
   const [content, setContent] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [isScheduleMode, setIsScheduleMode] = useState(false);
-  const [scheduledAt, setScheduledAt] = useState("");
+  const [scheduledAt, setScheduledAt] = useState<Date | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const isScheduleMode = scheduledAt !== null;
   const trimmedContent = content.trim();
   const canSend = isScheduleMode
-    ? Boolean(trimmedContent) && Boolean(scheduledAt) && !isSending && !disabled
+    ? Boolean(trimmedContent) &&
+      scheduledAt.getTime() > now.getTime() &&
+      !isSending &&
+      !disabled
     : (Boolean(trimmedContent) || Boolean(selectedFile)) && !isSending && !disabled;
   const statusText = isScheduleMode
     ? "Scheduling..."
@@ -101,13 +108,13 @@ function MessageComposer({
 
     try {
       if (isScheduleMode) {
-        const localDate = new Date(scheduledAt);
-        if (Number.isNaN(localDate.getTime())) {
-          throw new Error("Choose a valid delivery time.");
-        }
-        await scheduleTextMessage(chatId, trimmedContent, localDate.toISOString());
-        setSuccess("Message scheduled for this conversation.");
-        setScheduledAt("");
+        await scheduleTextMessage(
+          chatId,
+          trimmedContent,
+          scheduledAt.toISOString()
+        );
+        setSuccess(`Scheduled — sends ${formatDeliveryMoment(scheduledAt)}.`);
+        setScheduledAt(null);
       } else {
         const message = selectedFile
           ? await sendMediaMessage(chatId, selectedFile, trimmedContent)
@@ -172,31 +179,23 @@ function MessageComposer({
         </div>
       ) : null}
 
-      {isScheduleMode ? (
-        <div className="mb-3 rounded-2xl border border-primary/25 bg-primary/10 px-4 py-3">
-          <p className="text-sm font-medium text-foreground">
-            Schedule for {conversationLabel}
-          </p>
-          <label
-            htmlFor={scheduleInputId}
-            className="mt-3 block text-xs font-medium text-muted-foreground"
-          >
-            Local delivery date and time
-          </label>
-          <input
-            id={scheduleInputId}
-            type="datetime-local"
-            value={scheduledAt}
-            min={minimumLocalScheduleTime()}
-            disabled={disabled || isSending}
-            className="mt-1.5 h-10 w-full rounded-xl border border-input bg-black/20 px-3 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40"
-            onChange={(event) => {
-              setScheduledAt(event.target.value);
-              setError("");
-              setSuccess("");
-            }}
-          />
-        </div>
+      {scheduledAt !== null ? (
+        <ScheduleMessagePanel
+          conversationLabel={conversationLabel}
+          value={scheduledAt}
+          now={now}
+          disabled={disabled || isSending}
+          onChange={(next) => {
+            setScheduledAt(next);
+            setError("");
+            setSuccess("");
+          }}
+          onClose={() => {
+            setScheduledAt(null);
+            setError("");
+            setSuccess("");
+          }}
+        />
       ) : null}
 
       <div className="flex items-end gap-3">
@@ -224,9 +223,14 @@ function MessageComposer({
           size="icon"
           disabled={disabled || isSending || Boolean(selectedFile)}
           aria-label={isScheduleMode ? "Cancel scheduling" : "Schedule message"}
+          aria-pressed={isScheduleMode}
+          title={
+            selectedFile
+              ? "Attachments cannot be scheduled"
+              : "Schedule this message"
+          }
           onClick={() => {
-            setIsScheduleMode((current) => !current);
-            setScheduledAt("");
+            setScheduledAt(isScheduleMode ? null : defaultScheduleTime());
             setError("");
             setSuccess("");
           }}
@@ -238,7 +242,13 @@ function MessageComposer({
           value={content}
           rows={1}
           disabled={disabled || isSending}
-          placeholder={selectedFile ? "Add an optional caption" : "Message this chat"}
+          placeholder={
+            isScheduleMode
+              ? "Write the message to send later"
+              : selectedFile
+                ? "Add an optional caption"
+                : "Message this chat"
+          }
           className="min-h-11 max-h-36 min-w-0 flex-1 resize-y rounded-xl border border-input bg-white/[0.04] px-4 py-3 text-sm leading-5 text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:bg-white/[0.06] focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
           onChange={(event) => {
             setContent(event.target.value);
@@ -250,9 +260,19 @@ function MessageComposer({
           type="submit"
           size="icon"
           disabled={!canSend}
-          aria-label={isSending ? statusText : "Send message"}
+          aria-label={
+            isSending
+              ? statusText
+              : isScheduleMode
+                ? "Schedule message"
+                : "Send message"
+          }
         >
-          <Send className="size-4" aria-hidden="true" />
+          {isScheduleMode ? (
+            <CalendarClock className="size-4" aria-hidden="true" />
+          ) : (
+            <Send className="size-4" aria-hidden="true" />
+          )}
         </Button>
       </div>
 

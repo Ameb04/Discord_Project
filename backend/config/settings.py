@@ -174,15 +174,58 @@ USE_I18N = True
 
 USE_TZ = True
 
+# ---------------------------------------------------------------------------
+# Celery / scheduled message delivery
+# ---------------------------------------------------------------------------
 CELERY_BROKER_URL = os.environ.get(
     "CELERY_BROKER_URL", "redis://redis:6379/0"
 )
 CELERY_ENABLE_UTC = True
 CELERY_TIMEZONE = "UTC"
+
+# Nothing ever reads a task result back, so skip the result backend entirely
+# rather than writing a row per task that no one collects.
+CELERY_TASK_IGNORE_RESULT = True
+
+# Acknowledge a task only once its body has finished, so a worker killed
+# mid-delivery hands the message back to the broker instead of dropping it.
+# Delivery is idempotent (see messaging.services.deliver_scheduled_message),
+# which is what makes at-least-once safe here.
+CELERY_TASK_ACKS_LATE = True
+
+# With ETA tasks a greedy worker would reserve a pile of messages it cannot run
+# yet and sit on them; a prefetch of 1 keeps them in the broker instead.
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+# How far ahead a message may be parked in the broker as an ETA task. Messages
+# beyond this stay in Postgres — the cheapest place to hold them — until the
+# sweeper pulls them in.
+SCHEDULED_MESSAGE_DISPATCH_HORIZON_SECONDS = int(
+    os.environ.get("SCHEDULED_MESSAGE_DISPATCH_HORIZON_SECONDS", 15 * 60)
+)
+# How long an overdue message may sit queued before the sweeper assumes its task
+# was lost and queues a replacement.
+SCHEDULED_MESSAGE_REDISPATCH_AFTER_SECONDS = int(
+    os.environ.get("SCHEDULED_MESSAGE_REDISPATCH_AFTER_SECONDS", 5 * 60)
+)
+SCHEDULED_MESSAGE_SWEEP_INTERVAL_SECONDS = int(
+    os.environ.get("SCHEDULED_MESSAGE_SWEEP_INTERVAL_SECONDS", 60)
+)
+
+# Redis replays any message a worker has held longer than the visibility
+# timeout, so it must stay clear of the longest ETA we are willing to park.
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "visibility_timeout": SCHEDULED_MESSAGE_DISPATCH_HORIZON_SECONDS * 4,
+}
+
+# The sweep is a safety net, not the delivery path, so a tick missed during an
+# outage is worth dropping rather than replaying behind the backlog.
 CELERY_BEAT_SCHEDULE = {
     "dispatch-due-scheduled-messages": {
         "task": "messaging.tasks.dispatch_due_scheduled_messages",
-        "schedule": 30.0,
+        "schedule": float(SCHEDULED_MESSAGE_SWEEP_INTERVAL_SECONDS),
+        "options": {"expires": SCHEDULED_MESSAGE_SWEEP_INTERVAL_SECONDS - 5},
     },
 }
 

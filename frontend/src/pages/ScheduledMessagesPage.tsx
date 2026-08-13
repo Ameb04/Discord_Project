@@ -1,10 +1,12 @@
 import {
   AlertCircle,
   CalendarClock,
+  CheckCircle2,
   MessageSquareText,
   Trash2,
+  TriangleAlert,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { Link } from "react-router-dom";
 import { cancelScheduledMessage, getScheduledMessages } from "../api/chats";
 import { PageHeader } from "../components/PageHeader";
@@ -12,25 +14,62 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useNow } from "@/hooks/useNow";
+import {
+  formatDayLabel,
+  formatRelativeToNow,
+  formatTime,
+  startOfDay,
+} from "@/lib/datetime";
 import type { ScheduledMessageStatus, ScheduledMessageSummary } from "../types/chat";
 
 const statusDetails: Record<
   ScheduledMessageStatus,
-  { label: string; variant: "default" | "secondary" | "destructive" }
+  {
+    label: string;
+    variant: "default" | "secondary" | "destructive";
+    icon: ComponentType<{ className?: string }>;
+  }
 > = {
-  pending: { label: "Pending", variant: "default" },
-  sent: { label: "Sent", variant: "secondary" },
-  failed: { label: "Failed", variant: "destructive" },
+  pending: { label: "Pending", variant: "default", icon: CalendarClock },
+  sent: { label: "Sent", variant: "secondary", icon: CheckCircle2 },
+  failed: { label: "Failed", variant: "destructive", icon: TriangleAlert },
 };
 
-function formatScheduledTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+type MessageGroup = {
+  key: number;
+  label: string;
+  messages: ScheduledMessageSummary[];
+};
+
+/**
+ * Bucket messages by delivery day, preserving the API's chronological order.
+ * A flat list of absolute timestamps reads as noise; day headings turn it into
+ * a timeline.
+ */
+function groupByDay(
+  messages: ScheduledMessageSummary[],
+  now: Date
+): MessageGroup[] {
+  const groups: MessageGroup[] = [];
+
+  for (const message of messages) {
+    const day = startOfDay(new Date(message.scheduled_at));
+    const key = day.getTime();
+    const lastGroup = groups.at(-1);
+
+    if (lastGroup?.key === key) {
+      lastGroup.messages.push(message);
+    } else {
+      groups.push({ key, label: formatDayLabel(day, now), messages: [message] });
+    }
+  }
+
+  return groups;
 }
 
 function ScheduledMessagesPage() {
+  const now = useNow();
   const [messages, setMessages] = useState<ScheduledMessageSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -58,6 +97,11 @@ function ScheduledMessagesPage() {
     };
   }, []);
 
+  const groups = useMemo(() => groupByDay(messages, now), [messages, now]);
+  const pendingCount = messages.filter(
+    (message) => message.status === "pending"
+  ).length;
+
   async function handleCancel(messageId: number) {
     setCancellingId(messageId);
     setActionError("");
@@ -80,7 +124,11 @@ function ScheduledMessagesPage() {
       <PageHeader
         eyebrow="Messages"
         title="Scheduled messages"
-        description="Review messages you have scheduled, including their destination and delivery status."
+        description={
+          pendingCount > 0
+            ? `${pendingCount} message${pendingCount === 1 ? "" : "s"} waiting to be delivered.`
+            : "Review messages you have scheduled, including their destination and delivery status."
+        }
       />
 
       <section className="mt-8" aria-live="polite" aria-busy={isLoading}>
@@ -131,47 +179,79 @@ function ScheduledMessagesPage() {
           </div>
         )}
 
-        {!isLoading && !loadError && messages.length > 0 && (
-          <ul className="grid gap-3">
-            {messages.map((message) => {
-              const status = statusDetails[message.status];
-              return (
-                <li key={message.id}>
-                  <Card className="gap-3 p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <Link
-                        to={`/chats/${message.destination.id}`}
-                        className="inline-flex items-center gap-2 font-semibold text-foreground hover:text-primary"
-                      >
-                        <MessageSquareText className="size-4" aria-hidden="true" />
-                        {message.destination.name}
-                      </Link>
-                      <Badge variant={status.variant}>{status.label}</Badge>
-                    </div>
-                    <p className="text-sm text-foreground/85">{message.preview}</p>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <p className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                        <CalendarClock className="size-3.5" aria-hidden="true" />
-                        {formatScheduledTime(message.scheduled_at)}
-                      </p>
-                      {message.status === "pending" && (
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          size="sm"
-                          disabled={cancellingId === message.id}
-                          onClick={() => void handleCancel(message.id)}
-                        >
-                          <Trash2 className="size-3.5" aria-hidden="true" />
-                          {cancellingId === message.id ? "Cancelling..." : "Cancel"}
-                        </Button>
-                      )}
-                    </div>
-                  </Card>
-                </li>
-              );
-            })}
-          </ul>
+        {!isLoading && !loadError && groups.length > 0 && (
+          <div className="grid gap-6">
+            {groups.map((group) => (
+              <section key={group.key} aria-label={group.label}>
+                <h2 className="mb-2 px-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                  {group.label}
+                </h2>
+                <ul className="grid gap-3">
+                  {group.messages.map((message) => {
+                    const status = statusDetails[message.status];
+                    const StatusIcon = status.icon;
+                    const scheduledDate = new Date(message.scheduled_at);
+                    const isCancelling = cancellingId === message.id;
+
+                    return (
+                      <li key={message.id}>
+                        <Card className="gap-3 p-5">
+                          <div className="flex items-start justify-between gap-4">
+                            <Link
+                              to={`/chats/${message.destination.id}`}
+                              className="inline-flex items-center gap-2 font-semibold text-foreground hover:text-primary"
+                            >
+                              <MessageSquareText
+                                className="size-4"
+                                aria-hidden="true"
+                              />
+                              {message.destination.name}
+                            </Link>
+                            <Badge
+                              variant={status.variant}
+                              className="gap-1.5 whitespace-nowrap"
+                            >
+                              <StatusIcon className="size-3" aria-hidden="true" />
+                              {status.label}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-foreground/85">{message.preview}</p>
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <p className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                              <CalendarClock
+                                className="size-3.5"
+                                aria-hidden="true"
+                              />
+                              <time dateTime={message.scheduled_at}>
+                                {formatTime(scheduledDate)}
+                              </time>
+                              {message.status === "pending" && (
+                                <span className="text-muted-foreground/70">
+                                  · {formatRelativeToNow(scheduledDate, now)}
+                                </span>
+                              )}
+                            </p>
+                            {message.status === "pending" && (
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                disabled={isCancelling}
+                                onClick={() => void handleCancel(message.id)}
+                              >
+                                <Trash2 className="size-3.5" aria-hidden="true" />
+                                {isCancelling ? "Cancelling..." : "Cancel"}
+                              </Button>
+                            )}
+                          </div>
+                        </Card>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            ))}
+          </div>
         )}
       </section>
     </main>

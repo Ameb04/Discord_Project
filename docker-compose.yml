@@ -1,3 +1,17 @@
+# Settings shared by every process that boots Django (the web server and the
+# Celery worker). They must agree on storage and broker configuration, or the
+# worker would render attachment URLs differently from the web request that
+# created them.
+x-django-env: &django-env
+  PYTHONUNBUFFERED: "1"
+  USE_S3: "True"
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_PUBLIC_URL: http://localhost:9000
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+  S3_PUBLIC_BUCKET: media
+  S3_PRIVATE_BUCKET: private-media
+
 services:
   db:
     image: postgres:15
@@ -54,49 +68,47 @@ services:
     env_file:
       - .env
     environment:
+      <<: *django-env
       # Required for Django autoreload on Docker bind mounts (especially on Windows)
       WATCHFILES_FORCE_POLLING: "true"
-      # Stream runserver output live (no block-buffering in the container log).
-      PYTHONUNBUFFERED: "1"
       # The Vite dev server proxies /api to http://backend:8000 with
       # changeOrigin, so Django receives Host: backend:8000 and must allow it.
       ALLOWED_HOSTS: localhost,127.0.0.1,backend
-      # Object storage (MinIO). The backend talks to minio:9000 internally,
-      # while browsers fetch public objects from S3_PUBLIC_URL (localhost:9000).
-      USE_S3: "True"
-      S3_ENDPOINT_URL: http://minio:9000
-      S3_PUBLIC_URL: http://localhost:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      S3_PUBLIC_BUCKET: media
-      S3_PRIVATE_BUCKET: private-media
     depends_on:
       - db
       - redis
       - minio
     command: python manage.py runserver 0.0.0.0:8000
 
-  celery-worker:
+  # Background delivery for scheduled messages.
+  #
+  # Beat runs *embedded* in the worker (`--beat`) instead of as its own
+  # container. Scheduled messages are handed to the broker with an exact ETA the
+  # moment they are created, so beat no longer drives delivery — it only fires a
+  # once-a-minute reconciliation sweep. A whole container for that is more
+  # moving parts than the job is worth.
+  #
+  # Split it back into `celery -A config beat` if this ever runs more than one
+  # worker replica: embedded beat ticks once per replica, so N replicas would
+  # sweep N times a minute.
+  celery:
     build: ./backend
     volumes:
       - ./backend:/app
     env_file:
       - .env
+    environment:
+      <<: *django-env
     depends_on:
       - db
       - redis
-    command: celery -A config worker --loglevel=info
-
-  celery-beat:
-    build: ./backend
-    volumes:
-      - ./backend:/app
-    env_file:
-      - .env
-    depends_on:
-      - db
-      - redis
-    command: celery -A config beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+      - minio
+    command: >
+      celery -A config worker
+      --beat
+      --schedule=/tmp/celerybeat-schedule
+      --concurrency=2
+      --loglevel=info
 
   frontend:
     build:

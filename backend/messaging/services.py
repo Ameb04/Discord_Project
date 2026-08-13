@@ -13,6 +13,7 @@ from core.models import File
 
 from .models import NormalMessage, ScheduledMessage, ScheduledMessageStatus
 from .realtime import broadcast_message_after_commit
+from .scheduling import enqueue_delivery_on_commit
 
 
 def get_private_storage():
@@ -56,12 +57,16 @@ def create_scheduled_text_message(sender, chat, content, scheduled_at):
 
     normalized_content = _validate_text_content(content)
     normalized_scheduled_at = _validate_future_datetime(scheduled_at)
-    return ScheduledMessage.objects.create(
+    scheduled_message = ScheduledMessage.objects.create(
         sender=sender,
         chat=chat,
         content=normalized_content,
         scheduled_at=normalized_scheduled_at,
     )
+    # Hand it straight to a worker with an exact ETA. The periodic sweep is
+    # only a fallback for what this misses; see messaging.scheduling.
+    enqueue_delivery_on_commit(scheduled_message)
+    return scheduled_message
 
 
 def deliver_scheduled_message(scheduled_message_id, *, current_time=None):

@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone as datetime_timezone
 from unittest import mock
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.test import APIClient
@@ -269,20 +269,147 @@ class ScheduledMessageDeliveryTests(TestCase):
         delivered = NormalMessage.objects.get()
         broadcast.assert_called_once_with(delivered)
 
-    def test_dispatcher_only_enqueues_due_pending_messages(self):
-        due = self.scheduled_message(content="Due")
-        self.scheduled_message(due=False, content="Future")
-        sent = self.scheduled_message(content="Already sent")
-        sent.status = ScheduledMessageStatus.SENT
-        sent.save(update_fields=["status"])
+
+@override_settings(
+    SCHEDULED_MESSAGE_DISPATCH_HORIZON_SECONDS=900,
+    SCHEDULED_MESSAGE_REDISPATCH_AFTER_SECONDS=300,
+)
+class ScheduledMessageDispatchTests(TestCase):
+    """Messages reach a worker with an exact ETA; the sweep only backfills."""
+
+    def setUp(self):
+        self.sender = User.objects.create_user(
+            phone_number="14000", password="password"
+        )
+        self.recipient = User.objects.create_user(
+            phone_number="15000", password="password"
+        )
+        self.chat = Pv.objects.create(name="Dispatch chat")
+        PvMembership.objects.create(pv=self.chat, user=self.sender)
+        PvMembership.objects.create(pv=self.chat, user=self.recipient)
+
+    def scheduled_message(self, *, due_in, dispatched_ago=None, status=None):
+        message = ScheduledMessage.objects.create(
+            sender=self.sender,
+            chat=self.chat,
+            content="Queued content",
+            scheduled_at=timezone.now() + due_in,
+            status=status or ScheduledMessageStatus.PENDING,
+        )
+        if dispatched_ago is not None:
+            message.dispatched_at = timezone.now() - dispatched_ago
+            message.save(update_fields=["dispatched_at"])
+        return message
+
+    def enqueued_ids(self, apply_async):
+        return [call.args[0][0] for call in apply_async.call_args_list]
+
+    def test_creation_hands_near_term_message_to_broker_with_its_eta(self):
+        scheduled_at = timezone.now() + timedelta(minutes=5)
 
         with mock.patch(
-            "messaging.tasks.deliver_scheduled_message_task.delay"
-        ) as delay:
+            "messaging.tasks.deliver_scheduled_message_task.apply_async"
+        ) as apply_async:
+            with self.captureOnCommitCallbacks(execute=True):
+                message = create_scheduled_text_message(
+                    self.sender, self.chat, "Soon", scheduled_at
+                )
+
+        message.refresh_from_db()
+        apply_async.assert_called_once()
+        self.assertEqual(apply_async.call_args.args[0], (message.pk,))
+        self.assertEqual(
+            apply_async.call_args.kwargs["eta"], message.scheduled_at
+        )
+        self.assertIsNotNone(message.dispatched_at)
+
+    def test_creation_leaves_far_future_message_for_the_sweep(self):
+        with mock.patch(
+            "messaging.tasks.deliver_scheduled_message_task.apply_async"
+        ) as apply_async:
+            with self.captureOnCommitCallbacks(execute=True):
+                message = create_scheduled_text_message(
+                    self.sender,
+                    self.chat,
+                    "Next week",
+                    timezone.now() + timedelta(days=7),
+                )
+
+        message.refresh_from_db()
+        apply_async.assert_not_called()
+        self.assertIsNone(message.dispatched_at)
+
+    def test_sweep_queues_messages_entering_the_horizon(self):
+        entering = self.scheduled_message(due_in=timedelta(minutes=10))
+        self.scheduled_message(due_in=timedelta(hours=6))
+
+        with mock.patch(
+            "messaging.tasks.deliver_scheduled_message_task.apply_async"
+        ) as apply_async:
+            count = dispatch_due_scheduled_messages()
+
+        entering.refresh_from_db()
+        self.assertEqual(count, 1)
+        self.assertEqual(self.enqueued_ids(apply_async), [entering.pk])
+        self.assertIsNotNone(entering.dispatched_at)
+
+    def test_sweep_skips_messages_already_queued(self):
+        self.scheduled_message(
+            due_in=timedelta(minutes=10), dispatched_ago=timedelta(seconds=30)
+        )
+
+        with mock.patch(
+            "messaging.tasks.deliver_scheduled_message_task.apply_async"
+        ) as apply_async:
+            count = dispatch_due_scheduled_messages()
+
+        self.assertEqual(count, 0)
+        apply_async.assert_not_called()
+
+    def test_sweep_requeues_an_overdue_message_whose_task_was_lost(self):
+        stranded = self.scheduled_message(
+            due_in=-timedelta(minutes=20), dispatched_ago=timedelta(minutes=20)
+        )
+
+        with mock.patch(
+            "messaging.tasks.deliver_scheduled_message_task.apply_async"
+        ) as apply_async:
             count = dispatch_due_scheduled_messages()
 
         self.assertEqual(count, 1)
-        delay.assert_called_once_with(due.pk)
+        self.assertEqual(self.enqueued_ids(apply_async), [stranded.pk])
+
+    def test_sweep_gives_a_freshly_queued_overdue_message_time_to_run(self):
+        self.scheduled_message(
+            due_in=-timedelta(seconds=5), dispatched_ago=timedelta(seconds=5)
+        )
+
+        with mock.patch(
+            "messaging.tasks.deliver_scheduled_message_task.apply_async"
+        ) as apply_async:
+            count = dispatch_due_scheduled_messages()
+
+        self.assertEqual(count, 0)
+        apply_async.assert_not_called()
+
+    def test_sweep_ignores_messages_that_left_the_pending_state(self):
+        for lifecycle_status in (
+            ScheduledMessageStatus.SENT,
+            ScheduledMessageStatus.FAILED,
+            ScheduledMessageStatus.CANCELLED,
+        ):
+            with self.subTest(status=lifecycle_status):
+                self.scheduled_message(
+                    due_in=-timedelta(minutes=1), status=lifecycle_status
+                )
+
+        with mock.patch(
+            "messaging.tasks.deliver_scheduled_message_task.apply_async"
+        ) as apply_async:
+            count = dispatch_due_scheduled_messages()
+
+        self.assertEqual(count, 0)
+        apply_async.assert_not_called()
 
 
 class ScheduledMessageListTests(TestCase):

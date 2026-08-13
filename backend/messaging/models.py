@@ -82,6 +82,10 @@ class ScheduledMessage(Message):
         db_index=True,
     )
     processed_at = models.DateTimeField(null=True, blank=True)
+    # When this message was last handed to the delivery queue. Null means no
+    # worker knows about it yet, so the sweeper still owns it; a stale value on
+    # an overdue message means its task was lost and needs replacing.
+    dispatched_at = models.DateTimeField(null=True, blank=True)
     failure_reason = models.TextField(blank=True)
     delivered_message = models.OneToOneField(
         NormalMessage,
@@ -93,3 +97,11 @@ class ScheduledMessage(Message):
 
     class Meta:
         db_table = "scheduled_messages"
+        indexes = [
+            # Serves the sweeper, which scans pending messages by due time once
+            # a minute.
+            models.Index(
+                fields=("status", "scheduled_at"),
+                name="scheduled_msg_due_idx",
+            ),
+        ]
