@@ -16,6 +16,7 @@ import { getMe, getTags, updateMe, updateMeWithAvatar } from "../api/users";
 import { useAuth } from "../context/AuthContext";
 import { PageHeader } from "../components/PageHeader";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { BioField } from "@/components/ui/bio-field";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -79,6 +80,7 @@ function SettingsPage() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [gender, setGender] = useState<Gender>("male");
+  const [bio, setBio] = useState("");
   const [canBeAdded, setCanBeAdded] = useState(true);
   const [selectedTagId, setSelectedTagId] = useState<number | "">("");
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
@@ -107,6 +109,7 @@ function SettingsPage() {
         setFirstName(profile.first_name ?? "");
         setLastName(profile.last_name ?? "");
         setGender(profile.gender ?? "male");
+        setBio(profile.bio ?? "");
         setCanBeAdded(profile.can_be_added_to_group ?? true);
         setSelectedTagId(
           typeof profile.tag === "object" && profile.tag
@@ -152,6 +155,7 @@ function SettingsPage() {
         formData.append("first_name", firstName);
         formData.append("last_name", lastName);
         formData.append("gender", gender);
+        formData.append("bio", bio);
         formData.append("can_be_added_to_group", String(canBeAdded));
         formData.append("tag", tagValue === null ? "" : String(tagValue));
         formData.append("avatar", avatarFile);
@@ -161,6 +165,7 @@ function SettingsPage() {
           first_name: firstName,
           last_name: lastName,
           gender,
+          bio,
           can_be_added_to_group: canBeAdded,
           tag: tagValue,
         });
@@ -387,6 +392,8 @@ function SettingsPage() {
                 </Select>
               </div>
             </div>
+
+            <BioField value={bio} onChange={setBio} disabled={isSaving} />
 
             <label className="flex items-center gap-3 text-sm text-foreground/80">
               <Checkbox

@@ -13,12 +13,15 @@ import { useNow } from "@/hooks/useNow";
 import { HOUR_MS, ceilToMinutes, formatDeliveryMoment } from "@/lib/datetime";
 import { formatFileSize } from "@/lib/format";
 import { Button } from "../ui/button";
+import { Textarea } from "../ui/textarea";
 import { ScheduleMessageDialog } from "./ScheduleMessageDialog";
 
 type MessageComposerProps = {
   chatId: number;
   disabled?: boolean;
   conversationLabel: string;
+  /** Groups start with media off; only the owner can turn it on. */
+  canAttachFiles?: boolean;
   onMessageSent: (message: ChatMessage) => void;
 };
 
@@ -62,6 +65,7 @@ function MessageComposer({
   chatId,
   disabled = false,
   conversationLabel,
+  canAttachFiles = true,
   onMessageSent,
 }: MessageComposerProps) {
   const fileInputId = useId();
@@ -248,28 +252,32 @@ function MessageComposer({
         </AnimatePresence>
 
         <div className="flex items-end gap-2 sm:gap-3">
-          <input
-            ref={fileInputRef}
-            id={fileInputId}
-            type="file"
-            className="sr-only"
-            disabled={disabled || isSending}
-            onChange={(event) => {
-              setSelectedFile(event.target.files?.[0] ?? null);
-              setError("");
-            }}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="size-10 shrink-0"
-            disabled={disabled || isSending}
-            aria-label="Attach file"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Paperclip className="size-4" aria-hidden="true" />
-          </Button>
+          {canAttachFiles ? (
+            <>
+              <input
+                ref={fileInputRef}
+                id={fileInputId}
+                type="file"
+                className="sr-only"
+                disabled={disabled || isSending}
+                onChange={(event) => {
+                  setSelectedFile(event.target.files?.[0] ?? null);
+                  setError("");
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="size-10 shrink-0"
+                disabled={disabled || isSending}
+                aria-label="Attach file"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip className="size-4" aria-hidden="true" />
+              </Button>
+            </>
+          ) : null}
           <Button
             type="button"
             variant={isScheduleMode ? "default" : "outline"}
@@ -288,7 +296,7 @@ function MessageComposer({
             <CalendarClock className="size-4" aria-hidden="true" />
           </Button>
 
-          <textarea
+          <Textarea
             value={content}
             rows={1}
             disabled={disabled || isSending}
@@ -299,7 +307,9 @@ function MessageComposer({
                   ? "Add an optional caption"
                   : "Message this chat"
             }
-            className="min-h-10 max-h-36 min-w-0 flex-1 resize-y rounded-xl border border-input bg-white/[0.04] px-3 py-2.5 text-sm leading-5 text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:bg-white/[0.06] focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60 sm:px-4 sm:py-3"
+            // Grows with the draft up to a ceiling, then scrolls inside itself
+            // rather than pushing the conversation off screen.
+            className="max-h-36 min-h-10 flex-1 sm:px-4 sm:py-3"
             onChange={(event) => {
               setContent(event.target.value);
               if (error) setError("");

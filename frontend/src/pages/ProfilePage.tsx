@@ -1,4 +1,11 @@
-import { ArrowLeft, CircleAlert, Phone, Tag as TagIcon, VenusAndMars } from "lucide-react";
+import {
+  ArrowLeft,
+  CircleAlert,
+  Phone,
+  Quote,
+  Tag as TagIcon,
+  VenusAndMars,
+} from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 
@@ -154,6 +161,12 @@ function ProfilePage() {
             <DetailRow icon={<VenusAndMars className="size-4" />} label="Gender">
               <span className="capitalize">{user.gender || "Not specified"}</span>
             </DetailRow>
+
+            {user.bio?.trim() ? (
+              <DetailRow icon={<Quote className="size-4" />} label="Bio">
+                {user.bio}
+              </DetailRow>
+            ) : null}
 
             {user.tag ? (
               <DetailRow icon={<TagIcon className="size-4" />} label="Tag">

@@ -8,6 +8,7 @@ import { CountryPhoneField } from "../components/auth/CountryPhoneField";
 import { GenderSelect } from "../components/auth/GenderSelect";
 import { TextField } from "../components/auth/TextField";
 import { FormError } from "../components/auth/FormError";
+import { BioField } from "@/components/ui/bio-field";
 import { Button } from "@/components/ui/button";
 
 function splitFullName(fullName: string): { first_name: string; last_name: string } {
@@ -25,6 +26,7 @@ export function SignupPage() {
   const [countryCode, setCountryCode] = useState("+98");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [gender, setGender] = useState<"male" | "female">("male");
+  const [bio, setBio] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -47,6 +49,7 @@ export function SignupPage() {
       phone_number: `${countryCode}${phoneNumber.trim()}`,
       gender,
       password,
+      bio: bio.trim(),
     });
     setSubmitting(false);
 
@@ -85,6 +88,14 @@ export function SignupPage() {
           />
 
           <GenderSelect label="Gender" value={gender} onChange={setGender} />
+
+          <BioField
+            value={bio}
+            onChange={setBio}
+            disabled={submitting}
+            label="Bio (optional)"
+            placeholder="A short line about yourself"
+          />
 
           <TextField
             label="Password"
