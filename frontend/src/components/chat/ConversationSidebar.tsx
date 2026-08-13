@@ -384,7 +384,7 @@ function ConversationSidebar({
                 aria-controls={PANEL_ID}
                 onClick={() => onTabChange(key)}
                 className={cn(
-                  "relative inline-flex items-center justify-center gap-1.5 rounded-xl px-1.5 py-2 text-sm font-medium transition-colors",
+                  "relative inline-flex items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-sm font-medium transition-colors",
                   isActive
                     ? "text-foreground"
                     : "text-muted-foreground hover:text-foreground"
@@ -399,13 +399,18 @@ function ConversationSidebar({
                   />
                 ) : null}
                 <Icon className="relative size-4 shrink-0" aria-hidden="true" />
-                {/* The label steps aside below `sm` so three tabs and their
-                    counts still fit a phone-width sidebar. */}
-                <span className="relative hidden truncate sm:inline">{label}</span>
+                {/* A size down from the tab's own text: three labels, three
+                    icons and three counts share one rail, and the longest
+                    label is what decides whether any of them can be read in
+                    full. The label steps aside entirely below `sm`, where the
+                    counts alone have to do the work. */}
+                <span className="relative hidden truncate sm:inline">
+                  {label}
+                </span>
                 <Badge
                   variant={isActive ? "default" : "secondary"}
                   className={cn(
-                    "relative h-5 min-w-5 justify-center px-1.5",
+                    "relative h-5 min-w-5 justify-center px-1",
                     isActive && "bg-primary/80"
                   )}
                 >

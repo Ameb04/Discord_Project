@@ -81,6 +81,15 @@ type LiveConnectionState =
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 
+/**
+ * How long a dropout has to last before the header admits to it.
+ *
+ * The first retry goes out after a second and almost always succeeds, so
+ * announcing every blip would make a healthy socket look broken. Anything the
+ * reader could actually notice outlasts this.
+ */
+const OUTAGE_NOTICE_DELAY_MS = 3000;
+
 /** How long typing has to settle before a search actually goes out. */
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -308,6 +317,7 @@ function ChatPage({
   useEffect(() => {
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let outageNoticeTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectAttempts = 0;
     let shouldCatchUp = false;
     let disposed = false;
@@ -325,23 +335,41 @@ function ChatPage({
       }
     }
 
+    /**
+     * Start the clock on saying the connection is down.
+     *
+     * Already running is left alone on purpose: the delay measures the outage
+     * as a whole, not the attempt currently in flight.
+     */
+    function announceOutageLater() {
+      if (outageNoticeTimer) return;
+      outageNoticeTimer = setTimeout(() => {
+        if (!disposed) setLiveConnectionState("reconnecting");
+      }, OUTAGE_NOTICE_DELAY_MS);
+    }
+
+    function cancelOutageNotice() {
+      if (!outageNoticeTimer) return;
+      clearTimeout(outageNoticeTimer);
+      outageNoticeTimer = null;
+    }
+
     function scheduleReconnect() {
       if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        // Nothing left to wait for, so this one is said immediately.
+        cancelOutageNotice();
         setLiveConnectionState("disconnected");
         return;
       }
       const delay = Math.min(1000 * 2 ** reconnectAttempts, 10000);
       reconnectAttempts += 1;
-      setLiveConnectionState("reconnecting");
+      announceOutageLater();
       reconnectTimer = setTimeout(connect, delay);
     }
 
     function connect() {
       if (disposed) return;
 
-      setLiveConnectionState(
-        reconnectAttempts > 0 ? "reconnecting" : "connecting"
-      );
       try {
         socket = new WebSocket(chatWebSocketUrl(chatId));
       } catch {
@@ -359,6 +387,9 @@ function ChatPage({
         const catchUpNeeded = shouldCatchUp;
         reconnectAttempts = 0;
         shouldCatchUp = false;
+        // Back before anyone was told it was gone — the whole point of the
+        // delay is that this path leaves no trace in the header.
+        cancelOutageNotice();
         setLiveConnectionState("connected");
         if (catchUpNeeded) {
           void catchUpRecentMessages();
@@ -402,9 +433,8 @@ function ChatPage({
         });
       };
 
-      socket.onerror = () => {
-        if (!disposed) setLiveConnectionState("reconnecting");
-      };
+      // No `onerror`: a failed socket always closes right after, and `onclose`
+      // is the handler that knows whether a retry is even worth scheduling.
 
       socket.onclose = (event) => {
         socket = null;
@@ -414,6 +444,7 @@ function ChatPage({
         // 4401/4403 are the consumer's "not signed in" / "not a member" codes.
         // Retrying those would just replay the same rejection.
         if (event.code === 4401 || event.code === 4403) {
+          cancelOutageNotice();
           setLiveConnectionState("disconnected");
           return;
         }
@@ -426,6 +457,7 @@ function ChatPage({
     return () => {
       disposed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      cancelOutageNotice();
       if (socket) {
         socket.onclose = null;
         socket.close(1000, "Conversation changed");

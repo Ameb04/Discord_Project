@@ -101,10 +101,16 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [(
-                os.environ.get('REDIS_HOST', 'redis'),
-                int(os.environ.get('REDIS_PORT', '6379')),
-            )],
+            "hosts": [{
+                "host": os.environ.get('REDIS_HOST', 'redis'),
+                "port": int(os.environ.get('REDIS_PORT', '6379')),
+                # Must stay above the five seconds channels-redis parks on
+                # BZPOPMIN waiting for the next event. redis-py 8 defaults this
+                # to five as well, so an idle consumer raced its own read
+                # deadline and died with a TimeoutError every few seconds —
+                # which the browser saw as the socket dropping and reconnecting.
+                "socket_timeout": 60,
+            }],
         },
     },
 }
