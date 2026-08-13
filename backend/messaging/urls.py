@@ -7,6 +7,7 @@ from .views import (
     MessageHistoryView,
     MessageListCreateView,
     MessageSearchView,
+    MessageUpdateView,
     ScheduledMessageCreateView,
     ScheduledMessageCancelView,
     ScheduledMessageListView,
@@ -28,6 +29,7 @@ chat_message_patterns = [
         ScheduledMessageCreateView.as_view(),
         name="scheduled-message",
     ),
+    path("<int:message_id>/", MessageUpdateView.as_view(), name="message-update"),
     path("", MessageListCreateView.as_view(), name="message-list"),
 ]
 

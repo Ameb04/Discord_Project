@@ -4,7 +4,7 @@ from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -20,6 +20,7 @@ from .models import (
 from .serializers import (
     MediaMessageCreateSerializer,
     MessageSearchResultSerializer,
+    MessageUpdateSerializer,
     NormalMessageSerializer,
     ScheduledMessageListSerializer,
     ScheduledMessageSerializer,
@@ -31,6 +32,7 @@ from .services import (
     create_media_message,
     create_scheduled_text_message,
     create_text_message,
+    edit_message,
     get_private_storage,
 )
 
@@ -322,6 +324,52 @@ class MediaMessageCreateView(APIView):
             message, context={"request": request}
         )
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class MessageUpdateView(APIView):
+    """PATCH /api/chats/<chat_id>/messages/<message_id>/."""
+
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def patch(self, request, chat_id, message_id):
+        chat = get_object_or_404(Chat, pk=chat_id)
+        if not can_access_chat(request.user, chat):
+            raise PermissionDenied("You do not have permission to access this chat.")
+
+        # Data from form-data can have 'true'/'false' for booleans, DRF handles it
+        # but if using JSON, it handles native booleans.
+        request_serializer = MessageUpdateSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+
+        validated_data = request_serializer.validated_data
+
+        # We need to distinguish between missing and None for content
+        content = validated_data.get("content")
+        if "content" not in request.data:
+            content = None
+
+        remove_file = validated_data.get("remove_file", False)
+        if str(request.data.get("remove_file", "")).lower() == "true":
+            remove_file = True
+
+        try:
+            message = edit_message(
+                request.user,
+                chat,
+                message_id,
+                content=content,
+                uploaded_file=validated_data.get("file"),
+                remove_file=remove_file,
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(_validation_error_detail(exc)) from exc
+        except DjangoPermissionDenied as exc:
+            raise PermissionDenied(str(exc)) from exc
+
+        response_serializer = NormalMessageSerializer(
+            message, context={"request": request}
+        )
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 
 class AttachmentDownloadView(APIView):

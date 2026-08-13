@@ -58,9 +58,9 @@ export function SignupPage() {
   return (
     <AuthShell
       visualTitle="Join the conversation in seconds."
-      visualText="Create your account and start messaging people directly — no clutter, just chat."
+      visualText="Create your account and start messaging people directly - no clutter, just chat."
       visualBullets={[
-        "Only the essentials — set up in under a minute",
+        "Only the essentials - set up in under a minute",
         "Your profile, avatar, and tags in one place",
         "Private, direct conversations from day one",
       ]}

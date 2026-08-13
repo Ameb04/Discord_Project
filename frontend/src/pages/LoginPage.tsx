@@ -44,7 +44,7 @@ export function LoginPage() {
   return (
     <AuthShell
       visualTitle="Pick up right where you left off."
-      visualText="Sign in to keep the conversation going — fast, secure, and beautifully minimal."
+      visualText="Sign in to keep the conversation going - fast, secure, and beautifully minimal."
       visualBullets={[
         "Instant, real-time direct messaging",
         "Share files and media in a tap",

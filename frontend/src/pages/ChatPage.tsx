@@ -274,6 +274,12 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
     setHighlightMessageId(message.id);
   }
 
+  function handleMessageEdited(updatedMessage: ChatMessage) {
+    setMessages((currentMessages) =>
+      mergeMessagesById(currentMessages, [updatedMessage])
+    );
+  }
+
   async function handleLoadOlder() {
     if (isLoadingOlder || !hasOlderMessages || messages.length === 0) return;
 
@@ -551,6 +557,7 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
             <MessageList
               messages={messages}
               currentUser={user}
+              onMessageEdited={handleMessageEdited}
               highlightMessageId={highlightMessageId}
               messageRefs={messageRefs}
             />

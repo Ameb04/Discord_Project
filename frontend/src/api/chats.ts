@@ -27,6 +27,35 @@ export async function startDirectChat(targetUserPhoneNumber: string): Promise<Di
   return response.data;
 }
 
+export async function editMessage(
+  chatId: number,
+  messageId: number,
+  content: string,
+  file?: File,
+  removeFile?: boolean
+): Promise<ChatMessage> {
+  const url = `/api/chats/${chatId}/messages/${messageId}/`;
+
+  if (file || removeFile) {
+    const formData = new FormData();
+    formData.append("content", content);
+    if (file) {
+      formData.append("file", file);
+    }
+    if (removeFile) {
+      formData.append("remove_file", "true");
+    }
+
+    const response = await client.patch<ChatMessage>(url, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return response.data;
+  }
+
+  const response = await client.patch<ChatMessage>(url, { content });
+  return response.data;
+}
+
 export async function getChatMessages(
   chatId: number,
   params: MessageHistoryParams = {}
