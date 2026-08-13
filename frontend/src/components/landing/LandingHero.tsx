@@ -86,7 +86,7 @@ export function LandingHero() {
               <BlurText
                 text="conversations"
                 delay={0.26}
-                className="text-brand-gradient"
+                wordClassName="text-brand-gradient"
               />{" "}
               <BlurText text="come together." delay={0.42} />
             </h1>
