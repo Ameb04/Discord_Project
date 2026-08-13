@@ -1,10 +1,11 @@
 import { MessagesSquare } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { getConversationIndex } from "../api/chats";
 import ChatPage from "./ChatPage";
 import ConversationSidebar from "../components/chat/ConversationSidebar";
+import { CreateGroupDialog } from "@/components/group/CreateGroupDialog";
 import { AnimatedContent } from "@/components/motion/AnimatedContent";
 import { Button } from "../components/ui/button";
 import { Skeleton } from "../components/ui/skeleton";
@@ -23,7 +24,9 @@ const EMPTY_INDEX: ConversationIndex = { private_chats: [], groups: [] };
  */
 function HomePage() {
   const { chatId } = useParams<{ chatId?: string }>();
+  const navigate = useNavigate();
 
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [conversations, setConversations] = useState<ConversationIndex>(EMPTY_INDEX);
   const [activeTab, setActiveTab] = useState<ConversationTab>("private");
   // The tab the open conversation last forced, so a manual tab change is not
@@ -123,6 +126,11 @@ function HomePage() {
   // `grid-rows-[minmax(0,1fr)]` is explicit on purpose: the single row must fill
   // the container so both panes can scroll internally, and leaning on
   // `align-content: stretch` to do that implicitly is easy to break later.
+  /** Pull the conversation list again after something changed it. */
+  function refreshConversations() {
+    setReloadKey((key) => key + 1);
+  }
+
   return (
     <div className="mx-auto grid h-full min-h-0 w-full max-w-7xl grid-rows-[minmax(0,1fr)] gap-4 px-3 py-3 sm:px-6 sm:py-4 lg:grid-cols-[19rem_minmax(0,1fr)] lg:px-8">
       <div className={cn("min-h-0", hasRouteChatId && "hidden lg:block")}>
@@ -134,20 +142,40 @@ function HomePage() {
           selectedChatId={parsedChatId}
           isLoading={isLoading}
           error={error}
+          onCreateGroup={() => setIsCreatingGroup(true)}
         />
       </div>
 
       <main className={cn("min-h-0", !hasRouteChatId && "hidden lg:block")}>
         {parsedChatId !== null ? (
           <ChatPage
+            // Remount on conversation change so no state leaks between chats.
+            key={parsedChatId}
             chatId={parsedChatId}
             title={selectedTitle}
             subtitle={selectedSubtitle}
+            group={selectedGroup}
+            onGroupChanged={refreshConversations}
+            onGroupDeleted={() => {
+              refreshConversations();
+              navigate("/home", { replace: true });
+            }}
           />
         ) : (
           <EmptyPane invalidLink={hasRouteChatId} isLoading={isLoading} />
         )}
       </main>
+
+      <CreateGroupDialog
+        open={isCreatingGroup}
+        onClose={() => setIsCreatingGroup(false)}
+        onCreated={(group) => {
+          setIsCreatingGroup(false);
+          refreshConversations();
+          setActiveTab("groups");
+          navigate(`/chats/${group.id}`);
+        }}
+      />
     </div>
   );
 }

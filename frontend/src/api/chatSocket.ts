@@ -1,9 +1,30 @@
 import type { ChatMessage } from "../types/chat";
 
-type LiveMessageEvent = {
+/** A message arrived or changed — the payload is the message's current state. */
+export type LiveMessageCreated = {
   type: "message.created";
   message: ChatMessage;
 };
+
+/** A message was removed; only the ids travel, since the row is already gone. */
+export type LiveMessageDeleted = {
+  type: "message.deleted";
+  chat: number;
+  messageId: number;
+};
+
+/** One participant's read watermark moved, so receipts need recomputing. */
+export type LiveChatRead = {
+  type: "chat.read";
+  chat: number;
+  reader: string;
+  lastReadMessageId: number;
+};
+
+export type LiveChatEvent =
+  | LiveMessageCreated
+  | LiveMessageDeleted
+  | LiveChatRead;
 
 function websocketBaseUrl(): string {
   const configuredUrl = import.meta.env.VITE_WS_URL?.trim();
@@ -27,12 +48,23 @@ export function chatWebSocketUrl(chatId: number): string {
   return `${websocketBaseUrl()}/chats/${chatId}/`;
 }
 
-export function parseLiveMessageEvent(data: string): ChatMessage | null {
+/**
+ * Decode one socket frame, or null when it is not a shape we recognise.
+ *
+ * Validation is deliberate rather than a cast: the socket is the one input the
+ * UI does not control, and a malformed frame must not reach React state.
+ */
+export function parseLiveChatEvent(data: string): LiveChatEvent | null {
+  let event: Record<string, unknown>;
   try {
-    const event = JSON.parse(data) as Partial<LiveMessageEvent>;
+    event = JSON.parse(data) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  if (event.type === "message.created") {
     const message = event.message as Partial<ChatMessage> | undefined;
     if (
-      event.type !== "message.created" ||
       !message ||
       !Number.isInteger(message.id) ||
       !Number.isInteger(message.chat) ||
@@ -41,8 +73,35 @@ export function parseLiveMessageEvent(data: string): ChatMessage | null {
     ) {
       return null;
     }
-    return message as ChatMessage;
-  } catch {
-    return null;
+    return { type: "message.created", message: message as ChatMessage };
   }
+
+  if (event.type === "message.deleted") {
+    if (!Number.isInteger(event.message_id) || !Number.isInteger(event.chat)) {
+      return null;
+    }
+    return {
+      type: "message.deleted",
+      chat: event.chat as number,
+      messageId: event.message_id as number,
+    };
+  }
+
+  if (event.type === "chat.read") {
+    if (
+      !Number.isInteger(event.chat) ||
+      typeof event.reader !== "string" ||
+      !Number.isInteger(event.last_read_message_id)
+    ) {
+      return null;
+    }
+    return {
+      type: "chat.read",
+      chat: event.chat as number,
+      reader: event.reader,
+      lastReadMessageId: event.last_read_message_id as number,
+    };
+  }
+
+  return null;
 }

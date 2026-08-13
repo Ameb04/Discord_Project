@@ -1,5 +1,3 @@
-from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
-from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -10,6 +8,7 @@ from rest_framework.views import APIView
 
 from chats.models import Chat
 from chats.permissions import can_access_chat
+from core.api import domain_errors
 
 from .models import (
     Message,
@@ -18,6 +17,7 @@ from .models import (
     ScheduledMessageStatus,
 )
 from .serializers import (
+    MarkReadSerializer,
     MediaMessageCreateSerializer,
     MessageSearchResultSerializer,
     MessageUpdateSerializer,
@@ -32,8 +32,11 @@ from .services import (
     create_media_message,
     create_scheduled_text_message,
     create_text_message,
+    delete_message,
     edit_message,
+    get_chat_read_state,
     get_private_storage,
+    mark_chat_read,
 )
 
 
@@ -101,16 +104,12 @@ class MessageListCreateView(APIView):
         request_serializer = TextMessageCreateSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
 
-        try:
+        with domain_errors():
             message = create_text_message(
                 request.user,
                 chat,
                 request_serializer.validated_data["content"],
             )
-        except DjangoValidationError as exc:
-            raise ValidationError(_validation_error_detail(exc)) from exc
-        except DjangoPermissionDenied as exc:
-            raise PermissionDenied(str(exc)) from exc
 
         response_serializer = NormalMessageSerializer(
             message, context={"request": request}
@@ -184,17 +183,13 @@ class ScheduledMessageCreateView(APIView):
         request_serializer = ScheduledTextMessageCreateSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
 
-        try:
+        with domain_errors():
             message = create_scheduled_text_message(
                 request.user,
                 chat,
                 request_serializer.validated_data["content"],
                 request_serializer.validated_data["scheduled_at"],
             )
-        except DjangoValidationError as exc:
-            raise ValidationError(_validation_error_detail(exc)) from exc
-        except DjangoPermissionDenied as exc:
-            raise PermissionDenied(str(exc)) from exc
 
         response_serializer = ScheduledMessageSerializer(
             message, context={"request": request}
@@ -227,10 +222,8 @@ class ScheduledMessageCancelView(APIView):
     """DELETE /api/messages/scheduled/<message_id>/."""
 
     def delete(self, request, message_id):
-        try:
+        with domain_errors():
             message = cancel_scheduled_message(request.user, message_id)
-        except DjangoValidationError as exc:
-            raise ValidationError(_validation_error_detail(exc)) from exc
 
         if message is None:
             raise NotFound("Scheduled message not found.")
@@ -307,17 +300,13 @@ class MediaMessageCreateView(APIView):
         request_serializer = MediaMessageCreateSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
 
-        try:
+        with domain_errors():
             message = create_media_message(
                 request.user,
                 chat,
                 request_serializer.validated_data["file"],
                 request_serializer.validated_data.get("content", ""),
             )
-        except DjangoValidationError as exc:
-            raise ValidationError(_validation_error_detail(exc)) from exc
-        except DjangoPermissionDenied as exc:
-            raise PermissionDenied(str(exc)) from exc
 
         response_serializer = NormalMessageSerializer(
             message, context={"request": request}
@@ -339,7 +328,7 @@ class MessageUpdateView(APIView):
         request_serializer.is_valid(raise_exception=True)
         validated_data = request_serializer.validated_data
 
-        try:
+        with domain_errors():
             message = edit_message(
                 request.user,
                 chat,
@@ -350,15 +339,48 @@ class MessageUpdateView(APIView):
                 uploaded_file=validated_data.get("file"),
                 remove_file=validated_data["remove_file"],
             )
-        except DjangoValidationError as exc:
-            raise ValidationError(_validation_error_detail(exc)) from exc
-        except DjangoPermissionDenied as exc:
-            raise PermissionDenied(str(exc)) from exc
 
         response_serializer = NormalMessageSerializer(
             message, context={"request": request}
         )
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+    def delete(self, request, chat_id, message_id):
+        chat = get_object_or_404(Chat, pk=chat_id)
+        if not can_access_chat(request.user, chat):
+            raise PermissionDenied("You do not have permission to access this chat.")
+
+        with domain_errors():
+            delete_message(request.user, chat, message_id)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ChatReadStateView(APIView):
+    """GET/POST /api/chats/<chat_id>/messages/read/ - read receipts."""
+
+    def get(self, request, chat_id):
+        chat = get_object_or_404(Chat, pk=chat_id)
+
+        with domain_errors():
+            return Response(get_chat_read_state(request.user, chat))
+
+    def post(self, request, chat_id):
+        chat = get_object_or_404(Chat, pk=chat_id)
+
+        request_serializer = MarkReadSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+
+        with domain_errors():
+            last_read_message_id = mark_chat_read(
+                request.user,
+                chat,
+                # Omitted means "everything visible right now", which is what a
+                # client that just rendered the whole conversation means.
+                request_serializer.validated_data.get("message_id"),
+            )
+
+        return Response({"last_read_message_id": last_read_message_id})
 
 
 class AttachmentDownloadView(APIView):
@@ -386,11 +408,3 @@ class AttachmentDownloadView(APIView):
             filename=message.file.name,
             content_type=message.file.type or "application/octet-stream",
         )
-
-
-def _validation_error_detail(error):
-    if hasattr(error, "message_dict"):
-        return error.message_dict
-    if hasattr(error, "messages"):
-        return error.messages
-    return str(error)

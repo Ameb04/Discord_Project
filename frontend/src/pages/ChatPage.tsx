@@ -2,15 +2,18 @@ import {
   ArrowDown,
   ArrowLeft,
   Hash,
+  Info,
   LoaderCircle,
   MessageCircle,
   Search,
   SearchX,
+  Users,
   WifiOff,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -20,23 +23,44 @@ import {
 } from "react";
 import { Link } from "react-router-dom";
 
-import { getChatMessageContext, getChatMessages, searchChatMessages } from "../api/chats";
-import { chatWebSocketUrl, parseLiveMessageEvent } from "../api/chatSocket";
+import {
+  getChatMessageContext,
+  getChatMessages,
+  getChatReadState,
+  markChatRead,
+  searchChatMessages,
+} from "../api/chats";
+import { chatWebSocketUrl, parseLiveChatEvent } from "../api/chatSocket";
 import MessageComposer from "../components/chat/MessageComposer";
 import MessageList from "../components/chat/MessageList";
 import { AnimatedListItem, AnimatedListPresence } from "@/components/motion/AnimatedList";
 import { overlayTransition } from "@/components/motion/transitions";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "../components/ui/skeleton";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
+import { GroupInfoDialog } from "@/components/group/GroupInfoDialog";
+import { UserProfileDialog } from "@/components/user/UserProfileDialog";
 import { formatMessageTimestamp, personDisplayName } from "@/lib/format";
-import type { ChatMessage, ChatSearchResult } from "../types/chat";
+import type {
+  ChatMessage,
+  ChatReadState,
+  ChatSearchResult,
+  GroupConversation,
+  GroupDetail,
+} from "../types/chat";
 
 type ChatPageProps = {
   chatId: number;
   title?: string;
   subtitle?: string;
+  /** Present when this chat is a group, which unlocks the info panel. */
+  group?: GroupConversation;
+  /** Called when the group's profile changed elsewhere in this view. */
+  onGroupChanged?: (group: GroupDetail) => void;
+  /** Called after the owner deletes this group. */
+  onGroupDeleted?: () => void;
 };
 
 type LiveConnectionState =
@@ -85,7 +109,14 @@ function extractChatError(error: unknown) {
   return "Unable to load this chat right now.";
 }
 
-function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
+function ChatPage({
+  chatId,
+  title,
+  subtitle,
+  group,
+  onGroupChanged,
+  onGroupDeleted,
+}: ChatPageProps) {
   const { user } = useAuth();
   const messageRefs = useRef<Record<number, HTMLLIElement | null>>({});
 
@@ -104,9 +135,66 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
   const [searchResults, setSearchResults] = useState<ChatSearchResult[]>([]);
   const [searchedQuery, setSearchedQuery] = useState("");
   const [highlightMessageId, setHighlightMessageId] = useState<number | null>(null);
+  const [isGroupInfoOpen, setIsGroupInfoOpen] = useState(false);
+  const [profilePhoneNumber, setProfilePhoneNumber] = useState<string | null>(null);
+  const [readState, setReadState] = useState<ChatReadState | null>(null);
 
   const fallbackTitle = useMemo(() => `Chat #${chatId}`, [chatId]);
   const trimmedSearchQuery = searchQuery.trim();
+
+  // A group owner moderates by deleting; media stays off until they enable it,
+  // though their own uploads are never blocked by their own switch.
+  const canModerate = Boolean(group?.is_owner);
+  const canAttachFiles = !group || group.allow_media || group.is_owner;
+
+  /**
+   * Drop a message from every place the view still references it.
+   *
+   * Deletion arrives from two directions — the deleter's own request and the
+   * socket announcement — so this is written to be safely idempotent.
+   */
+  const removeMessageById = useCallback((messageId: number) => {
+    setMessages((currentMessages) =>
+      currentMessages.filter((message) => message.id !== messageId)
+    );
+    // Search results and the scroll target must let go too, or the UI would
+    // keep pointing at a message that no longer exists.
+    setSearchResults((currentResults) =>
+      currentResults.filter((result) => result.id !== messageId)
+    );
+    setHighlightMessageId((currentId) =>
+      currentId === messageId ? null : currentId
+    );
+  }, []);
+
+  /**
+   * Delivery state for one of the viewer's own messages.
+   *
+   * Derived from the watermark map rather than stored per message, so a single
+   * incoming read event updates every affected bubble at once and the client
+   * can never drift out of step with the server's own arithmetic.
+   */
+  const receiptFor = useCallback(
+    (message: ChatMessage) => {
+      if (!readState || message.sender?.phone_number !== user?.phone_number) {
+        return undefined;
+      }
+
+      const seenByCount = Object.values(readState.watermarks).filter(
+        (watermark) => watermark >= message.id
+      ).length;
+
+      return {
+        seenByCount,
+        seenByAll:
+          readState.other_member_count > 0 &&
+          seenByCount === readState.other_member_count,
+      };
+    },
+    [readState, user?.phone_number]
+  );
+
+  const newestMessageId = messages.length ? messages[messages.length - 1].id : null;
 
   function resetSearch() {
     setSearchQuery("");
@@ -217,12 +305,39 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
 
       socket.onmessage = (event) => {
         if (disposed || typeof event.data !== "string") return;
-        const message = parseLiveMessageEvent(event.data);
-        if (!message || message.chat !== chatId) return;
+        const liveEvent = parseLiveChatEvent(event.data);
+        if (!liveEvent) return;
 
-        setMessages((currentMessages) =>
-          mergeMessagesById(currentMessages, [message])
-        );
+        if (liveEvent.type === "message.created") {
+          if (liveEvent.message.chat !== chatId) return;
+          setMessages((currentMessages) =>
+            mergeMessagesById(currentMessages, [liveEvent.message])
+          );
+          return;
+        }
+
+        if (liveEvent.chat !== chatId) return;
+
+        if (liveEvent.type === "message.deleted") {
+          removeMessageById(liveEvent.messageId);
+          return;
+        }
+
+        setReadState((currentState) => {
+          // A reader who is not in the map is either the viewer themselves or
+          // someone who joined since this snapshot; either way, ignore them
+          // until the next load rather than inventing a member.
+          if (!currentState || !(liveEvent.reader in currentState.watermarks)) {
+            return currentState;
+          }
+          return {
+            ...currentState,
+            watermarks: {
+              ...currentState.watermarks,
+              [liveEvent.reader]: liveEvent.lastReadMessageId,
+            },
+          };
+        });
       };
 
       socket.onerror = () => {
@@ -254,13 +369,53 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
         socket.close(1000, "Conversation changed");
       }
     };
-  }, [chatId]);
+  }, [chatId, removeMessageById]);
 
   useEffect(() => {
     if (highlightMessageId == null) return;
     const node = messageRefs.current[highlightMessageId];
     node?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [highlightMessageId, messages]);
+
+  // Who has read what, as of opening the conversation. Live movement arrives
+  // over the socket; this is only the starting picture.
+  useEffect(() => {
+    let isCurrent = true;
+
+    async function loadReadState() {
+      setReadState(null);
+      try {
+        const nextReadState = await getChatReadState(chatId);
+        if (isCurrent) setReadState(nextReadState);
+      } catch {
+        // Receipts are an enhancement; the conversation reads fine without.
+      }
+    }
+
+    void loadReadState();
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [chatId]);
+
+  // Opening a conversation, or receiving into an open one, counts as reading
+  // it. Keyed on the newest id so this fires once per genuinely new message
+  // rather than on every render.
+  useEffect(() => {
+    if (newestMessageId == null) return;
+
+    async function reportRead() {
+      try {
+        await markChatRead(chatId, newestMessageId ?? undefined);
+      } catch {
+        // A missed receipt is not worth surfacing, and the watermark only
+        // moves forward — the next message reports this one too.
+      }
+    }
+
+    void reportRead();
+  }, [chatId, newestMessageId]);
 
   function handleMessageSent(message: ChatMessage) {
     setMessages((currentMessages) =>
@@ -368,14 +523,41 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
           </Link>
         </Button>
 
-        <div className="bg-brand-gradient hidden size-11 shrink-0 place-items-center rounded-2xl text-white shadow-lg shadow-primary/25 sm:grid">
-          <MessageCircle className="size-5" aria-hidden="true" />
-        </div>
+        {group ? (
+          <Avatar className="hidden size-11 shrink-0 border border-border sm:block">
+            {group.avatar_url ? (
+              <AvatarImage src={group.avatar_url} alt={group.name} />
+            ) : null}
+            <AvatarFallback className="bg-primary/15 text-foreground">
+              <Users className="size-5" aria-hidden="true" />
+            </AvatarFallback>
+          </Avatar>
+        ) : (
+          <div className="bg-brand-gradient hidden size-11 shrink-0 place-items-center rounded-2xl text-white shadow-lg shadow-primary/25 sm:grid">
+            <MessageCircle className="size-5" aria-hidden="true" />
+          </div>
+        )}
 
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">
-            {title ?? fallbackTitle}
-          </h1>
+          {/* In a group the name is the way in to members and settings, so it
+              is a real button rather than a heading with a click handler. */}
+          {group ? (
+            <button
+              type="button"
+              onClick={() => setIsGroupInfoOpen(true)}
+              className="flex max-w-full items-center gap-1.5 rounded-lg text-left outline-none transition-colors hover:text-primary focus-visible:ring-[3px] focus-visible:ring-ring/40"
+              aria-label={`View ${group.name} members and details`}
+            >
+              <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">
+                {group.name}
+              </h1>
+              <Info className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            </button>
+          ) : (
+            <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">
+              {title ?? fallbackTitle}
+            </h1>
+          )}
           {subtitle ? (
             <p className="mt-0.5 truncate text-xs text-muted-foreground sm:text-sm">
               {subtitle}
@@ -614,6 +796,11 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
             messages={messages}
             currentUser={user}
             onMessageEdited={handleMessageEdited}
+            onMessageDeleted={removeMessageById}
+            canModerate={canModerate}
+            canAttachFiles={canAttachFiles}
+            onOpenProfile={setProfilePhoneNumber}
+            receiptFor={receiptFor}
             highlightMessageId={highlightMessageId}
             messageRefs={messageRefs}
           />
@@ -624,10 +811,31 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
         <MessageComposer
           chatId={chatId}
           disabled={isLoading || Boolean(error)}
-          conversationLabel={title ?? fallbackTitle}
+          conversationLabel={group?.name ?? title ?? fallbackTitle}
+          canAttachFiles={canAttachFiles}
           onMessageSent={handleMessageSent}
         />
       )}
+
+      {group ? (
+        <GroupInfoDialog
+          open={isGroupInfoOpen}
+          groupId={group.id}
+          onClose={() => setIsGroupInfoOpen(false)}
+          onGroupChanged={onGroupChanged}
+          onGroupDeleted={onGroupDeleted}
+          onOpenProfile={setProfilePhoneNumber}
+        />
+      ) : null}
+
+      {/* One dialog for the whole conversation rather than one per bubble. */}
+      {profilePhoneNumber ? (
+        <UserProfileDialog
+          open
+          phoneNumber={profilePhoneNumber}
+          onClose={() => setProfilePhoneNumber(null)}
+        />
+      ) : null}
     </section>
   );
 }

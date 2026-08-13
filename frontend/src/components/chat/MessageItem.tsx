@@ -1,21 +1,101 @@
-import { Check, FileText, Paperclip, Pencil, X } from "lucide-react";
+import { Check, CheckCheck, FileText, Paperclip, Pencil, Trash2, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 
-import { editMessage } from "../../api/chats";
-import type { ChatMessage } from "../../types/chat";
+import { deleteMessage, editMessage } from "../../api/chats";
+import type { ChatMessage, MessageReceipt } from "../../types/chat";
 import type { User } from "../../types/user";
 import { formatFileSize, formatMessageTimestamp, personDisplayName } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import AttachmentLink from "./AttachmentLink";
 import { Button } from "../ui/button";
+import { ConfirmDialog } from "../ui/confirm-dialog";
+import { Textarea } from "../ui/textarea";
 
 type MessageItemProps = {
   message: ChatMessage;
   currentUser: User | null;
   onMessageEdited: (message: ChatMessage) => void;
+  onMessageDeleted: (messageId: number) => void;
+  /**
+   * Whether the viewer moderates this conversation — a group owner, who may
+   * delete anyone's message. Deliberately does not extend to editing: nobody
+   * gets to rewrite someone else's words.
+   */
+  canModerate?: boolean;
+  /** Attaching files is off in groups until the owner enables media. */
+  canAttachFiles?: boolean;
+  /** Opens the sender's profile. The dialog itself lives with the chat, so a
+   *  long conversation does not mount one per message. */
+  onOpenProfile?: (phoneNumber: string) => void;
+  /** How many other participants have read this message, and whether all have. */
+  receipt?: MessageReceipt;
   isHighlighted?: boolean;
   itemRef?: (node: HTMLLIElement | null) => void;
 };
+
+function extractMessageActionError(error: unknown, fallback: string) {
+  if (typeof error === "object" && error !== null) {
+    const maybeAxiosError = error as {
+      response?: { status?: number; data?: { detail?: unknown } };
+    };
+    if (typeof maybeAxiosError.response?.data?.detail === "string") {
+      return maybeAxiosError.response.data.detail;
+    }
+    if (maybeAxiosError.response?.status === 403) {
+      return "You do not have permission to do that.";
+    }
+  }
+  return fallback;
+}
+
+/**
+ * A message action in the meta row.
+ *
+ * Hidden until hover on pointer devices, always visible below `lg` — there is
+ * no hover on a touch screen, so a hover-only control would be unreachable.
+ */
+const actionButtonClass =
+  "grid size-6 place-items-center rounded-lg text-muted-foreground transition hover:bg-white/10 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none lg:opacity-0 lg:group-hover:opacity-100";
+
+/** The same control on the gradient bubble, where muted greys would vanish. */
+const ownActionButtonClass =
+  "text-white/70 hover:bg-white/15 hover:text-white focus-visible:ring-white/40";
+
+/**
+ * Delivery ticks, in the shape everyone already reads: one check means it left
+ * here, two mean somebody opened it.
+ *
+ * In a group the two-check state is dimmed until *everyone* has read it, so
+ * "some people have seen this" and "everyone has" stay distinguishable. The
+ * label carries the count, since colour alone would not.
+ */
+function ReceiptTicks({ receipt }: { receipt: MessageReceipt }) {
+  const { seenByCount, seenByAll } = receipt;
+
+  const label =
+    seenByCount === 0
+      ? "Sent"
+      : seenByAll
+        ? "Seen by everyone"
+        : `Seen by ${seenByCount}`;
+
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      className={cn(
+        "inline-flex shrink-0 items-center",
+        seenByAll ? "text-sky-200" : "text-white/60"
+      )}
+    >
+      {seenByCount > 0 ? (
+        <CheckCheck className="size-3.5" aria-hidden="true" />
+      ) : (
+        <Check className="size-3.5" aria-hidden="true" />
+      )}
+    </span>
+  );
+}
 
 /** Attachment chip shared by the "new file" and "existing file" edit states. */
 function AttachmentChip({
@@ -63,6 +143,11 @@ function MessageItem({
   message,
   currentUser,
   onMessageEdited,
+  onMessageDeleted,
+  canModerate = false,
+  canAttachFiles = true,
+  onOpenProfile,
+  receipt,
   isHighlighted = false,
   itemRef,
 }: MessageItemProps) {
@@ -72,13 +157,20 @@ function MessageItem({
   const [removeFile, setRemoveFile] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileInputId = useId();
 
+  const senderPhoneNumber = message.sender?.phone_number;
   const isOwnMessage =
     Boolean(currentUser?.phone_number) &&
-    message.sender?.phone_number === currentUser?.phone_number;
+    senderPhoneNumber === currentUser?.phone_number;
+  // Authors edit their own words; owners moderate by removing, not rewriting.
+  const canEdit = isOwnMessage;
+  const canDelete = isOwnMessage || canModerate;
 
   useEffect(() => {
     if (!isEditing) return;
@@ -129,10 +221,29 @@ function MessageItem({
       setIsEditing(false);
       setSelectedFile(null);
       setRemoveFile(false);
-    } catch {
-      setError("Failed to edit message.");
+    } catch (err) {
+      setError(extractMessageActionError(err, "Failed to edit message."));
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    setIsDeleting(true);
+    setDeleteError("");
+
+    try {
+      await deleteMessage(message.chat, message.id);
+      // The socket also announces this, but the sender should not have to wait
+      // for a round trip through the channel layer to see their own action.
+      onMessageDeleted(message.id);
+      setIsConfirmingDelete(false);
+    } catch (err) {
+      setDeleteError(
+        extractMessageActionError(err, "Failed to delete message.")
+      );
+    } finally {
+      setIsDeleting(false);
     }
   }
 
@@ -165,14 +276,26 @@ function MessageItem({
         )}
       >
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <p
-            className={cn(
-              "text-sm font-semibold",
-              isOwnMessage ? "text-white" : "text-foreground"
-            )}
-          >
-            {isOwnMessage ? "You" : personDisplayName(message.sender)}
-          </p>
+          {/* Someone else's name opens their profile; your own has nothing to
+              reveal that you cannot already see in settings. */}
+          {!isOwnMessage && senderPhoneNumber && onOpenProfile ? (
+            <button
+              type="button"
+              onClick={() => onOpenProfile(senderPhoneNumber)}
+              className="rounded text-sm font-semibold text-foreground underline-offset-4 outline-none transition-colors hover:text-primary hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/40"
+            >
+              {personDisplayName(message.sender)}
+            </button>
+          ) : (
+            <p
+              className={cn(
+                "text-sm font-semibold",
+                isOwnMessage ? "text-white" : "text-foreground"
+              )}
+            >
+              {isOwnMessage ? "You" : personDisplayName(message.sender)}
+            </p>
+          )}
           <div className="flex items-center gap-2">
             <time
               dateTime={message.sent_at}
@@ -193,20 +316,45 @@ function MessageItem({
                 (edited)
               </span>
             ) : null}
+            {isOwnMessage && receipt ? <ReceiptTicks receipt={receipt} /> : null}
           </div>
 
-          {isOwnMessage && !isEditing ? (
+          {!isEditing && (canEdit || canDelete) ? (
             // Sits in the meta row rather than floating outside the bubble: a
             // hover-only control pinned to a corner is unreachable on touch and
             // clips against the edge of a narrow viewport.
-            <button
-              type="button"
-              onClick={() => setIsEditing(true)}
-              aria-label="Edit message"
-              className="ml-auto grid size-6 shrink-0 place-items-center rounded-lg text-white/70 opacity-100 transition hover:bg-white/15 hover:text-white focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-white/40 focus-visible:outline-none lg:opacity-0 lg:group-hover:opacity-100"
-            >
-              <Pencil className="size-3.5" aria-hidden="true" />
-            </button>
+            <div className="ml-auto flex shrink-0 items-center gap-0.5">
+              {canEdit ? (
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(true)}
+                  aria-label="Edit message"
+                  className={cn(actionButtonClass, isOwnMessage && ownActionButtonClass)}
+                >
+                  <Pencil className="size-3.5" aria-hidden="true" />
+                </button>
+              ) : null}
+              {canDelete ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteError("");
+                    setIsConfirmingDelete(true);
+                  }}
+                  aria-label={
+                    isOwnMessage
+                      ? "Delete message"
+                      : `Delete message from ${personDisplayName(message.sender)}`
+                  }
+                  className={cn(
+                    actionButtonClass,
+                    isOwnMessage ? ownActionButtonClass : "hover:text-red-300"
+                  )}
+                >
+                  <Trash2 className="size-3.5" aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
 
@@ -231,7 +379,7 @@ function MessageItem({
                 removeLabel="Remove existing attachment"
                 onRemove={() => setRemoveFile(true)}
               />
-            ) : (
+            ) : canAttachFiles ? (
               <div className="flex items-center">
                 <input
                   ref={fileInputRef}
@@ -265,17 +413,16 @@ function MessageItem({
                   Attach file
                 </Button>
               </div>
-            )}
+            ) : null}
 
-            <textarea
+            <Textarea
               ref={textareaRef}
               value={editContent}
               disabled={isSaving}
               className={cn(
-                "min-h-11 min-w-0 resize-y rounded-xl border px-3 py-2 text-sm leading-5 shadow-sm outline-none transition focus-visible:ring-[3px] disabled:opacity-60",
-                isOwnMessage
-                  ? "border-white/20 bg-black/20 text-white placeholder:text-white/50 focus-visible:border-white focus-visible:ring-white/30"
-                  : "border-input bg-white/[0.04] text-foreground placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-ring/40"
+                "max-h-48 min-h-11",
+                isOwnMessage &&
+                  "border-white/20 bg-black/20 text-white placeholder:text-white/50 focus-visible:border-white focus-visible:bg-black/20 focus-visible:ring-white/30"
               )}
               onChange={(event) => {
                 setEditContent(event.target.value);
@@ -346,6 +493,38 @@ function MessageItem({
           </>
         )}
       </article>
+
+      <ConfirmDialog
+        open={isConfirmingDelete}
+        title="Delete message?"
+        description={
+          isOwnMessage
+            ? "This removes the message for everyone in the conversation."
+            : `This removes ${personDisplayName(message.sender)}'s message for everyone.`
+        }
+        confirmLabel="Delete message"
+        pendingLabel="Deleting..."
+        isPending={isDeleting}
+        error={deleteError}
+        onCancel={() => setIsConfirmingDelete(false)}
+        onConfirm={() => void handleDelete()}
+      >
+        {message.content || message.attachment ? (
+          <blockquote className="rounded-2xl border border-border bg-white/[0.03] px-4 py-3 text-sm">
+            {message.content ? (
+              <p className="line-clamp-4 leading-6 break-words whitespace-pre-wrap text-foreground/80">
+                {message.content}
+              </p>
+            ) : null}
+            {message.attachment ? (
+              <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+                <span className="truncate">{message.attachment.name}</span>
+              </p>
+            ) : null}
+          </blockquote>
+        ) : null}
+      </ConfirmDialog>
     </li>
   );
 }

@@ -24,6 +24,16 @@ const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
+ * Currently-open dialogs, innermost last.
+ *
+ * Every dialog listens on `document`, and listeners on the same node fire in
+ * registration order regardless of `stopPropagation` — so without this an
+ * Escape meant for a confirmation layered over a panel would close the panel
+ * underneath it too. Only the top of the stack reacts to keys.
+ */
+const openDialogStack: symbol[] = [];
+
+/**
  * Modal dialog: portalled, focus-trapped, and animated with `motion`.
  *
  * Built here rather than pulled in as another dependency — the app already owns
@@ -77,7 +87,13 @@ function Dialog({
   useEffect(() => {
     if (!open) return;
 
+    const dialogId = Symbol("dialog");
+    openDialogStack.push(dialogId);
+
     function handleKeyDown(event: KeyboardEvent) {
+      // Let the innermost open dialog have the keyboard to itself.
+      if (openDialogStack[openDialogStack.length - 1] !== dialogId) return;
+
       if (event.key === "Escape") {
         event.stopPropagation();
         onClose();
@@ -106,7 +122,11 @@ function Dialog({
     }
 
     document.addEventListener("keydown", handleKeyDown, true);
-    return () => document.removeEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown, true);
+      const index = openDialogStack.indexOf(dialogId);
+      if (index >= 0) openDialogStack.splice(index, 1);
+    };
   }, [onClose, open]);
 
   const panelMotion = prefersReducedMotion

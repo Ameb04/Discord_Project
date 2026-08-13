@@ -1,10 +1,11 @@
 import { LoaderCircle } from "lucide-react";
-import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import Navbar from "../components/Navbar";
 import SearchResultsPage from "../pages/SearchResultsPage";
 import SettingsPage from "../pages/SettingsPage";
 import HomePage from "../pages/HomePage";
+import JoinGroupPage from "../pages/JoinGroupPage";
 import { LandingPage } from "../pages/LandingPage";
 import { LoginPage } from "../pages/LoginPage";
 import { SignupPage } from "../pages/SignupPage";
@@ -40,9 +41,20 @@ function PublicOnlyRoute() {
 
 function ProtectedRoute() {
   const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
 
   if (isLoading) return <LoadingScreen />;
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isAuthenticated) {
+    // Carry the target along so signing in lands where the visitor was
+    // headed — otherwise a shared group invite dead-ends at the inbox.
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: `${location.pathname}${location.search}` }}
+      />
+    );
+  }
 
   return <Outlet />;
 }
@@ -84,6 +96,9 @@ export function AppRouter() {
           <Route path="/scheduled" element={<ScheduledMessagesPage />} />
           <Route path="/profile/:phone_number" element={<ProfilePage />} />
           <Route path="/chats/:chatId" element={<HomePage />} />
+          {/* Signed-in only: joining needs an account, and the redirect back
+              to /login preserves nothing, so the link is shown after auth. */}
+          <Route path="/join/:token" element={<JoinGroupPage />} />
         </Route>
       </Route>
 

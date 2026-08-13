@@ -49,6 +49,40 @@ class ChatMessageConsumer(AsyncWebsocketConsumer):
         return
 
     async def chat_message(self, event):
+        await self._forward_if_still_allowed(
+            {
+                "type": "message.created",
+                "message": event["message"],
+            }
+        )
+
+    async def chat_message_deleted(self, event):
+        await self._forward_if_still_allowed(
+            {
+                "type": "message.deleted",
+                "message_id": event["message_id"],
+                "chat": event["chat_id"],
+            }
+        )
+
+    async def chat_read(self, event):
+        # Echoed to the reader too; their own client simply ignores it, and
+        # filtering here would cost a comparison on every fan-out.
+        await self._forward_if_still_allowed(
+            {
+                "type": "chat.read",
+                "chat": event["chat_id"],
+                "reader": event["reader_id"],
+                "last_read_message_id": event["last_read_message_id"],
+            }
+        )
+
+    async def _forward_if_still_allowed(self, payload):
+        """Send one event, re-checking access so a removed member goes quiet.
+
+        Membership can change while the socket is open, so authorization is
+        rechecked per event rather than only at connect time.
+        """
         if not await _user_can_access_chat(self.user_id, self.chat_id):
             await self.channel_layer.group_discard(
                 self.group_name,
@@ -58,11 +92,4 @@ class ChatMessageConsumer(AsyncWebsocketConsumer):
             await self.close(code=4403)
             return
 
-        await self.send(
-            text_data=json.dumps(
-                {
-                    "type": "message.created",
-                    "message": event["message"],
-                }
-            )
-        )
+        await self.send(text_data=json.dumps(payload))

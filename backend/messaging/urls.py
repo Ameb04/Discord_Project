@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AttachmentDownloadView,
+    ChatReadStateView,
     MediaMessageCreateView,
     MessageContextView,
     MessageHistoryView,
@@ -18,6 +19,7 @@ app_name = "messaging"
 chat_message_patterns = [
     path("history/", MessageHistoryView.as_view(), name="message-history"),
     path("search/", MessageSearchView.as_view(), name="message-search"),
+    path("read/", ChatReadStateView.as_view(), name="chat-read-state"),
     path(
         "<int:message_id>/context/",
         MessageContextView.as_view(),

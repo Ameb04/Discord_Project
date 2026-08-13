@@ -20,6 +20,7 @@ from django.contrib import admin
 from django.urls import include, path
 
 from accounts.urls import auth_patterns, user_patterns
+from chats.urls import group_patterns
 from core.views import TagListView
 
 urlpatterns = [
@@ -28,6 +29,7 @@ urlpatterns = [
     path('api/users/', include((user_patterns, 'users'))),
     path('api/tags/', TagListView.as_view(), name='tag-list'),
     path('api/chats/', include('chats.urls')),
+    path('api/groups/', include((group_patterns, 'groups'))),
     path('api/messages/', include('messaging.urls')),
 ]
 

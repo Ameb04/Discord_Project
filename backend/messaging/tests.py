@@ -22,7 +22,12 @@ from chats.models import (
 from core.models import File
 
 from .models import Message, NormalMessage
-from .services import create_media_message, create_text_message, edit_message
+from .services import (
+    create_media_message,
+    create_text_message,
+    delete_message,
+    edit_message,
+)
 
 
 class AuthenticatedClientMixin:
@@ -399,8 +404,8 @@ class MediaMessageUploadApiTests(
         PvMembership.objects.create(pv=pv, user=self.member)
         return pv
 
-    def create_group(self):
-        group = Group.objects.create(name="Group chat", owner=self.owner)
+    def create_group(self, **fields):
+        group = Group.objects.create(name="Group chat", owner=self.owner, **fields)
         GroupMembership.objects.create(group=group, user=self.member)
         return group
 
@@ -440,7 +445,7 @@ class MediaMessageUploadApiTests(
         self.assert_no_messages_files_or_private_uploads()
 
     def test_authorized_group_owner_and_member_can_upload(self):
-        group = self.create_group()
+        group = self.create_group(allow_media=True)
 
         owner_response = self.authenticated_client(self.owner).post(
             self.media_url(group),
@@ -457,6 +462,30 @@ class MediaMessageUploadApiTests(
         self.assertEqual(member_response.status_code, 201)
         self.assertEqual(NormalMessage.objects.count(), 2)
         self.assertEqual(File.objects.count(), 2)
+
+    def test_group_member_cannot_upload_while_media_is_disabled(self):
+        # Media is off until the owner opts in, which is the default state.
+        group = self.create_group()
+
+        response = self.authenticated_client(self.member).post(
+            self.media_url(group),
+            {"file": self.upload("member.txt", b"member", "text/plain")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assert_no_messages_files_or_private_uploads()
+
+    def test_group_owner_can_upload_while_media_is_disabled(self):
+        group = self.create_group()
+
+        response = self.authenticated_client(self.owner).post(
+            self.media_url(group),
+            {"file": self.upload("owner.txt", b"owner", "text/plain")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201)
 
     def test_unauthorized_group_user_cannot_upload(self):
         group = self.create_group()
@@ -762,7 +791,9 @@ class MediaMessageCreationServiceTests(PrivateMediaTestMixin, TestCase):
         self.assert_no_messages_files_or_private_uploads()
 
     def test_authorized_group_owner_and_member_can_upload(self):
-        group = Group.objects.create(name="Group chat", owner=self.owner)
+        group = Group.objects.create(
+            name="Group chat", owner=self.owner, allow_media=True
+        )
         GroupMembership.objects.create(group=group, user=self.member)
 
         owner_message = create_media_message(
@@ -776,6 +807,19 @@ class MediaMessageCreationServiceTests(PrivateMediaTestMixin, TestCase):
         self.assertEqual(member_message.sender, self.member)
         self.assertEqual(NormalMessage.objects.count(), 2)
         self.assertEqual(File.objects.count(), 2)
+
+    def test_group_member_cannot_upload_while_media_is_disabled(self):
+        group = Group.objects.create(name="Group chat", owner=self.owner)
+        GroupMembership.objects.create(group=group, user=self.member)
+
+        with self.assertRaises(PermissionDenied):
+            create_media_message(
+                self.member,
+                group,
+                self.upload("member.txt", b"member", "text/plain"),
+            )
+
+        self.assert_no_messages_files_or_private_uploads()
 
     def test_unauthorized_group_user_cannot_upload(self):
         group = Group.objects.create(name="Group chat", owner=self.owner)
@@ -1151,3 +1195,334 @@ class MessageHistorySearchApiTests(AuthenticatedClientMixin, TestCase):
         self.assertEqual(response.data["focus_message_id"], third.pk)
         self.assertTrue(response.data["has_older"])
         self.assertFalse(response.data["has_newer"])
+
+
+class MessageDeletionServiceTests(PrivateMediaTestMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.owner = User.objects.create_user(phone_number="1000", password="password")
+        self.member = User.objects.create_user(phone_number="2000", password="password")
+        self.third_user = User.objects.create_user(
+            phone_number="3000", password="password"
+        )
+
+    def create_pv(self):
+        pv = Pv.objects.create(name="Direct chat")
+        PvMembership.objects.create(pv=pv, user=self.owner)
+        PvMembership.objects.create(pv=pv, user=self.member)
+        return pv
+
+    def create_group(self, **fields):
+        group = Group.objects.create(name="Group chat", owner=self.owner, **fields)
+        GroupMembership.objects.create(group=group, user=self.owner)
+        GroupMembership.objects.create(group=group, user=self.member)
+        return group
+
+    def test_sender_can_delete_own_message(self):
+        pv = self.create_pv()
+        message = create_text_message(self.member, pv, "Regret this")
+
+        delete_message(self.member, pv, message.pk)
+
+        message.refresh_from_db()
+        self.assertTrue(message.is_deleted)
+
+    def test_deleted_message_disappears_from_history(self):
+        pv = self.create_pv()
+        kept = create_text_message(self.member, pv, "Kept")
+        removed = create_text_message(self.member, pv, "Removed")
+
+        delete_message(self.member, pv, removed.pk)
+
+        visible = NormalMessage.objects.filter(chat=pv, is_deleted=False)
+        self.assertEqual([item.pk for item in visible], [kept.pk])
+
+    def test_other_participant_cannot_delete_in_direct_chat(self):
+        pv = self.create_pv()
+        message = create_text_message(self.member, pv, "Mine")
+
+        with self.assertRaises(PermissionDenied):
+            delete_message(self.owner, pv, message.pk)
+
+        message.refresh_from_db()
+        self.assertFalse(message.is_deleted)
+
+    def test_group_owner_can_delete_another_members_message(self):
+        group = self.create_group()
+        message = create_text_message(self.member, group, "Spam")
+
+        delete_message(self.owner, group, message.pk)
+
+        message.refresh_from_db()
+        self.assertTrue(message.is_deleted)
+
+    def test_group_member_cannot_delete_another_members_message(self):
+        group = self.create_group()
+        message = create_text_message(self.owner, group, "Owner post")
+
+        with self.assertRaises(PermissionDenied):
+            delete_message(self.member, group, message.pk)
+
+        message.refresh_from_db()
+        self.assertFalse(message.is_deleted)
+
+    def test_non_member_cannot_delete(self):
+        group = self.create_group()
+        message = create_text_message(self.owner, group, "Owner post")
+
+        with self.assertRaises(PermissionDenied):
+            delete_message(self.third_user, group, message.pk)
+
+    def test_deleting_drops_the_attachment_and_its_bytes(self):
+        pv = self.create_pv()
+        message = create_media_message(
+            self.member, pv, self.upload("secret.txt", b"secret", "text/plain")
+        )
+        stored_file = message.file
+        stored_path = self.private_path(stored_file)
+        self.assertTrue(stored_path.exists())
+
+        delete_message(self.member, pv, message.pk)
+
+        message.refresh_from_db()
+        self.assertTrue(message.is_deleted)
+        self.assertIsNone(message.file)
+        self.assertFalse(File.objects.filter(pk=stored_file.pk).exists())
+        self.assertFalse(stored_path.exists())
+
+    def test_deleting_twice_reports_the_message_as_gone(self):
+        pv = self.create_pv()
+        message = create_text_message(self.member, pv, "Once")
+        delete_message(self.member, pv, message.pk)
+
+        with self.assertRaises(ValidationError):
+            delete_message(self.member, pv, message.pk)
+
+    def test_deleting_a_message_from_another_chat_is_rejected(self):
+        pv = self.create_pv()
+        group = self.create_group()
+        message = create_text_message(self.member, pv, "Elsewhere")
+
+        with self.assertRaises(ValidationError):
+            delete_message(self.member, group, message.pk)
+
+
+class MessageDeletionApiTests(AuthenticatedClientMixin, TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(phone_number="1000", password="password")
+        self.member = User.objects.create_user(phone_number="2000", password="password")
+        self.third_user = User.objects.create_user(
+            phone_number="3000", password="password"
+        )
+
+    def create_pv(self):
+        pv = Pv.objects.create(name="Direct chat")
+        PvMembership.objects.create(pv=pv, user=self.owner)
+        PvMembership.objects.create(pv=pv, user=self.member)
+        return pv
+
+    def message_url(self, chat, message):
+        return f"/api/chats/{chat.pk}/messages/{message.pk}/"
+
+    def test_sender_deletes_own_message(self):
+        pv = self.create_pv()
+        message = create_text_message(self.member, pv, "Bye")
+
+        response = self.authenticated_client(self.member).delete(
+            self.message_url(pv, message)
+        )
+
+        self.assertEqual(response.status_code, 204)
+        message.refresh_from_db()
+        self.assertTrue(message.is_deleted)
+
+    def test_other_user_cannot_delete(self):
+        pv = self.create_pv()
+        message = create_text_message(self.member, pv, "Mine")
+
+        response = self.authenticated_client(self.owner).delete(
+            self.message_url(pv, message)
+        )
+
+        self.assertEqual(response.status_code, 403)
+        message.refresh_from_db()
+        self.assertFalse(message.is_deleted)
+
+    def test_non_member_gets_forbidden(self):
+        pv = self.create_pv()
+        message = create_text_message(self.member, pv, "Private")
+
+        response = self.authenticated_client(self.third_user).delete(
+            self.message_url(pv, message)
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_group_owner_deletes_a_members_message(self):
+        group = Group.objects.create(name="Group chat", owner=self.owner)
+        GroupMembership.objects.create(group=group, user=self.owner)
+        GroupMembership.objects.create(group=group, user=self.member)
+        message = create_text_message(self.member, group, "Spam")
+
+        response = self.authenticated_client(self.owner).delete(
+            self.message_url(group, message)
+        )
+
+        self.assertEqual(response.status_code, 204)
+        message.refresh_from_db()
+        self.assertTrue(message.is_deleted)
+
+    def test_group_owner_still_cannot_edit_a_members_message(self):
+        # Deletion is a moderation power; editing someone else's words is not.
+        group = Group.objects.create(name="Group chat", owner=self.owner)
+        GroupMembership.objects.create(group=group, user=self.owner)
+        GroupMembership.objects.create(group=group, user=self.member)
+        message = create_text_message(self.member, group, "Original")
+
+        response = self.authenticated_client(self.owner).patch(
+            self.message_url(group, message),
+            {"content": "Rewritten"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        message.refresh_from_db()
+        self.assertEqual(message.content, "Original")
+
+    def test_deleting_a_missing_message_is_a_validation_error(self):
+        pv = self.create_pv()
+
+        response = self.authenticated_client(self.member).delete(
+            f"/api/chats/{pv.pk}/messages/999999/"
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+
+class ReadReceiptTests(AuthenticatedClientMixin, TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(phone_number="1000", password="password")
+        self.member = User.objects.create_user(phone_number="2000", password="password")
+        self.third_user = User.objects.create_user(
+            phone_number="3000", password="password"
+        )
+
+    def create_pv(self):
+        pv = Pv.objects.create(name="Direct chat")
+        PvMembership.objects.create(pv=pv, user=self.owner)
+        PvMembership.objects.create(pv=pv, user=self.member)
+        return pv
+
+    def create_group(self):
+        group = Group.objects.create(name="Group chat", owner=self.owner)
+        GroupMembership.objects.create(group=group, user=self.owner)
+        GroupMembership.objects.create(group=group, user=self.member)
+        GroupMembership.objects.create(group=group, user=self.third_user)
+        return group
+
+    def read_url(self, chat):
+        return f"/api/chats/{chat.pk}/messages/read/"
+
+    def test_nothing_is_read_before_anyone_opens_the_chat(self):
+        pv = self.create_pv()
+        create_text_message(self.owner, pv, "Hello")
+
+        response = self.authenticated_client(self.owner).get(self.read_url(pv))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["other_member_count"], 1)
+        self.assertEqual(response.data["watermarks"], {self.member.pk: 0})
+
+    def test_reading_advances_the_watermark_for_the_sender_to_see(self):
+        pv = self.create_pv()
+        message = create_text_message(self.owner, pv, "Hello")
+
+        marked = self.authenticated_client(self.member).post(
+            self.read_url(pv), {"message_id": message.pk}, format="json"
+        )
+        self.assertEqual(marked.status_code, 200)
+        self.assertEqual(marked.data["last_read_message_id"], message.pk)
+
+        seen = self.authenticated_client(self.owner).get(self.read_url(pv))
+        self.assertEqual(seen.data["watermarks"], {self.member.pk: message.pk})
+
+    def test_omitting_the_id_marks_everything_read(self):
+        pv = self.create_pv()
+        create_text_message(self.owner, pv, "First")
+        latest = create_text_message(self.owner, pv, "Second")
+
+        response = self.authenticated_client(self.member).post(
+            self.read_url(pv), {}, format="json"
+        )
+
+        self.assertEqual(response.data["last_read_message_id"], latest.pk)
+
+    def test_the_watermark_never_moves_backwards(self):
+        pv = self.create_pv()
+        first = create_text_message(self.owner, pv, "First")
+        second = create_text_message(self.owner, pv, "Second")
+        client = self.authenticated_client(self.member)
+
+        client.post(self.read_url(pv), {"message_id": second.pk}, format="json")
+        # A stale tab reporting an older message must not un-read the newer one.
+        response = client.post(
+            self.read_url(pv), {"message_id": first.pk}, format="json"
+        )
+
+        self.assertEqual(response.data["last_read_message_id"], second.pk)
+
+    def test_the_viewers_own_watermark_is_never_reported_back(self):
+        pv = self.create_pv()
+        message = create_text_message(self.owner, pv, "Hello")
+        client = self.authenticated_client(self.owner)
+        client.post(self.read_url(pv), {"message_id": message.pk}, format="json")
+
+        response = client.get(self.read_url(pv))
+
+        self.assertNotIn(self.owner.pk, response.data["watermarks"])
+
+    def test_a_group_reports_every_other_member(self):
+        group = self.create_group()
+        message = create_text_message(self.owner, group, "Hello everyone")
+        self.authenticated_client(self.member).post(
+            self.read_url(group), {"message_id": message.pk}, format="json"
+        )
+
+        response = self.authenticated_client(self.owner).get(self.read_url(group))
+
+        self.assertEqual(response.data["other_member_count"], 2)
+        self.assertEqual(
+            response.data["watermarks"],
+            {self.member.pk: message.pk, self.third_user.pk: 0},
+        )
+
+    def test_marking_a_message_from_another_chat_is_rejected(self):
+        pv = self.create_pv()
+        group = self.create_group()
+        message = create_text_message(self.owner, pv, "Elsewhere")
+
+        response = self.authenticated_client(self.member).post(
+            self.read_url(group), {"message_id": message.pk}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_non_members_cannot_read_or_report(self):
+        pv = self.create_pv()
+        client = self.authenticated_client(self.third_user)
+
+        self.assertEqual(client.get(self.read_url(pv)).status_code, 403)
+        self.assertEqual(
+            client.post(self.read_url(pv), {}, format="json").status_code, 403
+        )
+
+    def test_deleted_messages_do_not_set_the_watermark(self):
+        pv = self.create_pv()
+        message = create_text_message(self.owner, pv, "Recalled")
+        delete_message(self.owner, pv, message.pk)
+
+        response = self.authenticated_client(self.member).post(
+            self.read_url(pv), {}, format="json"
+        )
+
+        self.assertEqual(response.data["last_read_message_id"], 0)
