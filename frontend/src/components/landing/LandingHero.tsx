@@ -30,7 +30,7 @@ function ChatPreview() {
             Hey! Did you get the project files?
           </div>
           <div className="bg-brand-gradient ml-auto max-w-[80%] rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm text-white shadow-lg shadow-primary/30">
-            Just opened them — looks great 🔥
+            Just opened them - looks great 🔥
           </div>
           <div className="max-w-[80%] rounded-2xl rounded-tl-sm border border-border bg-white/[0.04] px-4 py-2.5 text-sm text-foreground/85">
             Sending the final deck now.
@@ -82,7 +82,7 @@ export function LandingHero() {
             </h1>
 
             <p className="mt-6 max-w-xl text-base leading-8 text-muted-foreground">
-              Direct messaging, media sharing, and a calm, focused interface —
+              Direct messaging, media sharing, and a calm, focused interface -
               wrapped in a modern dark experience built for speed.
             </p>
 

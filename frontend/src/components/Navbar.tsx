@@ -1,4 +1,4 @@
-import { Home, Search, Settings } from "lucide-react";
+import { CalendarClock, Home, Search, Settings } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,12 @@ function Navbar() {
       to: "/search",
       active: pathname.startsWith("/search"),
       icon: Search,
+    },
+    {
+      label: "Scheduled",
+      to: "/scheduled",
+      active: pathname.startsWith("/scheduled"),
+      icon: CalendarClock,
     },
     {
       label: "Settings",

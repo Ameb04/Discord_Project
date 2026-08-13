@@ -1,5 +1,19 @@
 import client from "./client";
-import type { ChatMessage, ConversationIndex, DirectChat } from "../types/chat";
+import type {
+  ChatHistoryContextResponse,
+  ChatHistoryResponse,
+  ChatMessage,
+  ChatSearchResponse,
+  DirectChat,
+  ConversationIndex,
+  ScheduledChatMessage,
+  ScheduledMessageSummary,
+} from "../types/chat";
+
+type MessageHistoryParams = {
+  before?: number;
+  limit?: number;
+};
 
 export async function getConversationIndex(): Promise<ConversationIndex> {
   const response = await client.get<ConversationIndex>("/api/chats/");
@@ -20,28 +34,65 @@ export async function editMessage(
   file?: File,
   removeFile?: boolean
 ): Promise<ChatMessage> {
+  const url = `/api/chats/${chatId}/messages/${messageId}/`;
+
   if (file || removeFile) {
     const formData = new FormData();
-    if (content) formData.append("content", content);
-    if (file) formData.append("file", file);
-    if (removeFile) formData.append("remove_file", "true");
+    formData.append("content", content);
+    if (file) {
+      formData.append("file", file);
+    }
+    if (removeFile) {
+      formData.append("remove_file", "true");
+    }
 
-    const response = await client.patch<ChatMessage>(
-      `/api/chats/${chatId}/messages/${messageId}/`,
-      formData,
-      { headers: { "Content-Type": "multipart/form-data" } }
-    );
-    return response.data;
-  } else {
-    const response = await client.patch<ChatMessage>(`/api/chats/${chatId}/messages/${messageId}/`, {
-      content,
+    const response = await client.patch<ChatMessage>(url, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
     });
     return response.data;
   }
+
+  const response = await client.patch<ChatMessage>(url, { content });
+  return response.data;
 }
 
-export async function getChatMessages(chatId: number): Promise<ChatMessage[]> {
-  const response = await client.get<ChatMessage[]>(`/api/chats/${chatId}/messages/`);
+export async function getChatMessages(
+  chatId: number,
+  params: MessageHistoryParams = {}
+): Promise<ChatHistoryResponse> {
+  const response = await client.get<ChatHistoryResponse>(
+    `/api/chats/${chatId}/messages/history/`,
+    {
+      params,
+    }
+  );
+  return response.data;
+}
+
+export async function searchChatMessages(
+  chatId: number,
+  query: string
+): Promise<ChatSearchResponse> {
+  const response = await client.get<ChatSearchResponse>(
+    `/api/chats/${chatId}/messages/search/`,
+    {
+      params: { q: query },
+    }
+  );
+  return response.data;
+}
+
+export async function getChatMessageContext(
+  chatId: number,
+  messageId: number,
+  window = 20
+): Promise<ChatHistoryContextResponse> {
+  const response = await client.get<ChatHistoryContextResponse>(
+    `/api/chats/${chatId}/messages/${messageId}/context/`,
+    {
+      params: { window },
+    }
+  );
   return response.data;
 }
 
@@ -74,4 +125,30 @@ export async function sendMediaMessage(
     }
   );
   return response.data;
+}
+
+export async function scheduleTextMessage(
+  chatId: number,
+  content: string,
+  scheduledAt: string
+): Promise<ScheduledChatMessage> {
+  const response = await client.post<ScheduledChatMessage>(
+    `/api/chats/${chatId}/messages/scheduled/`,
+    {
+      content,
+      scheduled_at: scheduledAt,
+    }
+  );
+  return response.data;
+}
+
+export async function getScheduledMessages(): Promise<ScheduledMessageSummary[]> {
+  const response = await client.get<ScheduledMessageSummary[]>(
+    "/api/messages/scheduled/"
+  );
+  return response.data;
+}
+
+export async function cancelScheduledMessage(messageId: number): Promise<void> {
+  await client.delete(`/api/messages/scheduled/${messageId}/`);
 }

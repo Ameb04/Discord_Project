@@ -40,6 +40,7 @@ ALLOWED_HOSTS = [
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -172,6 +173,18 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 
 USE_TZ = True
+
+CELERY_BROKER_URL = os.environ.get(
+    "CELERY_BROKER_URL", "redis://redis:6379/0"
+)
+CELERY_ENABLE_UTC = True
+CELERY_TIMEZONE = "UTC"
+CELERY_BEAT_SCHEDULE = {
+    "dispatch-due-scheduled-messages": {
+        "task": "messaging.tasks.dispatch_due_scheduled_messages",
+        "schedule": 30.0,
+    },
+}
 
 
 # Static files (CSS, JavaScript, Images)

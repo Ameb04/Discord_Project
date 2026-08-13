@@ -10,6 +10,8 @@ type MessageItemProps = {
   message: ChatMessage;
   currentUser: User | null;
   onMessageEdited: (message: ChatMessage) => void;
+  isHighlighted?: boolean;
+  itemRef?: (node: HTMLLIElement | null) => void;
 };
 
 function displayName(message: ChatMessage) {
@@ -29,7 +31,13 @@ function formatSentAt(value: string) {
   }).format(date);
 }
 
-function MessageItem({ message, currentUser, onMessageEdited }: MessageItemProps) {
+function MessageItem({
+  message,
+  currentUser,
+  onMessageEdited,
+  isHighlighted = false,
+  itemRef,
+}: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -105,13 +113,16 @@ function MessageItem({ message, currentUser, onMessageEdited }: MessageItemProps
   }
 
   return (
-    <li className={`flex ${isOwnMessage ? "justify-end" : "justify-start"} group`}>
+    <li
+      ref={itemRef}
+      className={`group scroll-mt-24 flex ${isOwnMessage ? "justify-end" : "justify-start"}`}
+    >
       <article
-        className={`relative max-w-[min(34rem,100%)] rounded-2xl border px-4 py-3 shadow-lg ${
+        className={`relative max-w-[min(34rem,100%)] rounded-2xl border px-4 py-3 shadow-lg transition-shadow ${
           isOwnMessage
             ? "bg-brand-gradient border-transparent text-white shadow-primary/25 rounded-tr-sm"
             : "border-border bg-white/[0.04] text-foreground shadow-black/20 rounded-tl-sm"
-        }`}
+        } ${isHighlighted ? "ring-2 ring-primary/70 ring-offset-2 ring-offset-background" : ""}`}
       >
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <p

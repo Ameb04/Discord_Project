@@ -938,3 +938,121 @@ class MediaMessageCreationServiceTests(TestCase):
         if self.private_root.exists():
             stored_paths = [path for path in self.private_root.rglob("*") if path.is_file()]
             self.assertEqual(stored_paths, [])
+
+
+class MessageHistorySearchApiTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            phone_number="1000", password="password"
+        )
+        self.member = User.objects.create_user(
+            phone_number="2000", password="password"
+        )
+        self.third_user = User.objects.create_user(
+            phone_number="3000", password="password"
+        )
+
+    def authenticated_client(self, user):
+        client = APIClient()
+        session = client.session
+        session[APP_USER_SESSION_KEY] = user.pk
+        session.save()
+        return client
+
+    def create_pv(self):
+        pv = Pv.objects.create(name="Direct chat")
+        PvMembership.objects.create(pv=pv, user=self.owner)
+        PvMembership.objects.create(pv=pv, user=self.member)
+        return pv
+
+    def test_history_returns_latest_messages_and_older_flag(self):
+        pv = self.create_pv()
+        create_text_message(self.owner, pv, "First")
+        create_text_message(self.member, pv, "Second")
+        create_text_message(self.owner, pv, "Third")
+
+        response = self.authenticated_client(self.owner).get(
+            f"/api/chats/{pv.pk}/messages/history/",
+            {"limit": 2},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["content"] for item in response.data["results"]], ["Second", "Third"])
+        self.assertTrue(response.data["has_older"])
+        self.assertFalse(response.data["has_newer"])
+        self.assertEqual(response.data["count"], 3)
+
+    def test_history_before_cursor_returns_older_slice(self):
+        pv = self.create_pv()
+        create_text_message(self.owner, pv, "First")
+        create_text_message(self.member, pv, "Second")
+        create_text_message(self.owner, pv, "Third")
+        create_text_message(self.member, pv, "Fourth")
+
+        latest = self.authenticated_client(self.owner).get(
+            f"/api/chats/{pv.pk}/messages/history/",
+            {"limit": 2},
+        )
+        oldest_message_id = latest.data["results"][0]["id"]
+
+        response = self.authenticated_client(self.owner).get(
+            f"/api/chats/{pv.pk}/messages/history/",
+            {"before": oldest_message_id, "limit": 2},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["content"] for item in response.data["results"]], ["First", "Second"])
+        self.assertTrue(response.data["has_newer"])
+        self.assertFalse(response.data["has_older"])
+
+    def test_search_returns_only_matching_messages_in_current_chat(self):
+        pv = self.create_pv()
+        other_group = Group.objects.create(name="Other group", owner=self.owner)
+        GroupMembership.objects.create(group=other_group, user=self.member)
+
+        create_text_message(self.owner, pv, "hello there")
+        create_text_message(self.member, pv, "nothing to see")
+        create_text_message(self.member, pv, "another hello message")
+        create_text_message(self.owner, other_group, "hello from group")
+        client = self.authenticated_client(self.owner)
+
+        response = client.get(
+            f"/api/chats/{pv.pk}/messages/search/",
+            {"q": "hello"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual([item["preview"] for item in response.data["results"]], [
+            "another hello message",
+            "hello there",
+        ])
+
+    def test_search_rejects_unauthorized_user(self):
+        pv = self.create_pv()
+        create_text_message(self.owner, pv, "secret hello")
+
+        response = self.authenticated_client(self.third_user).get(
+            f"/api/chats/{pv.pk}/messages/search/",
+            {"q": "hello"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_context_returns_window_around_requested_message(self):
+        pv = self.create_pv()
+        first = create_text_message(self.owner, pv, "First")
+        second = create_text_message(self.member, pv, "Second")
+        third = create_text_message(self.owner, pv, "Third")
+        create_text_message(self.member, pv, "Fourth")
+
+        response = self.authenticated_client(self.owner).get(
+            f"/api/chats/{pv.pk}/messages/{third.pk}/context/",
+            {"window": 3},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["content"] for item in response.data["results"]], ["Second", "Third", "Fourth"])
+        self.assertEqual(response.data["focus_message_id"], third.pk)
+        self.assertTrue(response.data["has_older"])
+        self.assertFalse(response.data["has_newer"])
