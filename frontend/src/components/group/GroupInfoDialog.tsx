@@ -501,9 +501,9 @@ function GroupInfoDialog({
               {/* A removal failure is reported inside the confirmation, which
                   stays open on error — repeating it here would double-report. */}
               <ul className="grid gap-1.5">
-                <AnimatedListPresence>
+                <AnimatedListPresence reorder>
                   {group.members.map((member, index) => (
-                    <AnimatedListItem key={member.user.phone_number} index={index}>
+                    <AnimatedListItem key={member.user.phone_number} index={index} reorder>
                       <MemberRow
                         member={member}
                         // The owner can remove anyone but themselves.

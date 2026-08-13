@@ -5,6 +5,7 @@ import { getTags } from "@/api/users";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { BioField } from "@/components/ui/bio-field";
 import { Button } from "@/components/ui/button";
+import { CharacterCounter } from "@/components/ui/character-counter";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -15,6 +16,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { initialsFor } from "@/lib/format";
+import {
+  GROUP_NAME_MAX_LENGTH,
+  GROUP_NAME_WARN_REMAINING,
+} from "@/lib/profile";
 import type { Tag } from "@/types/user";
 
 import { NO_TAG, type GroupProfileDraft } from "./groupProfile";
@@ -42,6 +47,7 @@ function GroupProfileFields({
   const [tags, setTags] = useState<Tag[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const nameId = useId();
+  const nameCounterId = useId();
 
   useEffect(() => {
     let isCurrent = true;
@@ -137,14 +143,28 @@ function GroupProfileFields({
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor={nameId}>Group name</Label>
+        <div className="flex items-baseline justify-between gap-3">
+          <Label htmlFor={nameId}>Group name</Label>
+          <CharacterCounter
+            id={nameCounterId}
+            value={value.name}
+            max={GROUP_NAME_MAX_LENGTH}
+            warnRemaining={GROUP_NAME_WARN_REMAINING}
+          />
+        </div>
         <Input
           id={nameId}
           value={value.name}
           disabled={disabled}
-          maxLength={255}
+          maxLength={GROUP_NAME_MAX_LENGTH}
+          aria-describedby={nameCounterId}
           placeholder="Weekend hiking crew"
-          onChange={(event) => update({ name: event.target.value })}
+          // `maxLength` covers typing; the slice covers a paste, which the
+          // attribute truncates silently in some browsers and not at all in
+          // others.
+          onChange={(event) =>
+            update({ name: event.target.value.slice(0, GROUP_NAME_MAX_LENGTH) })
+          }
         />
       </div>
 

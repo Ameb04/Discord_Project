@@ -69,15 +69,23 @@ export function SignupPage() {
       ]}
     >
       <AuthCard title="Create your account" description="Just a few details and you're in.">
-        <form onSubmit={submit} className="grid gap-4">
-          <TextField
-            label="Full name"
-            placeholder="Enter your full name"
-            icon={<UserRound className="size-4" />}
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            autoComplete="name"
-          />
+        {/* Six stacked fields do not fit a laptop viewport, and this page is
+            meant to be read without scrolling — so the two single-line fields
+            share a row and the vertical rhythm is one step tighter than the
+            login form's. */}
+        <form onSubmit={submit} className="grid gap-3.5">
+          <div className="grid gap-3.5 sm:grid-cols-[minmax(0,1fr)_9rem]">
+            <TextField
+              label="Full name"
+              placeholder="Enter your full name"
+              icon={<UserRound className="size-4" />}
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              autoComplete="name"
+            />
+
+            <GenderSelect label="Gender" value={gender} onChange={setGender} />
+          </div>
 
           <CountryPhoneField
             label="Phone number"
@@ -86,8 +94,6 @@ export function SignupPage() {
             onCountryCodeChange={setCountryCode}
             onPhoneNumberChange={setPhoneNumber}
           />
-
-          <GenderSelect label="Gender" value={gender} onChange={setGender} />
 
           <BioField
             value={bio}
@@ -109,13 +115,13 @@ export function SignupPage() {
 
           <FormError message={localError || error} />
 
-          <Button type="submit" size="lg" disabled={submitting} className="mt-1 w-full">
+          <Button type="submit" size="lg" disabled={submitting} className="w-full">
             <UserRoundPlus className="size-4" aria-hidden="true" />
             {submitting ? "Creating account..." : "Create account"}
           </Button>
         </form>
 
-        <div className="mt-6 text-center text-sm text-muted-foreground">
+        <div className="mt-4 text-center text-sm text-muted-foreground">
           Already have an account?{" "}
           <Link to="/login" className="font-semibold text-primary hover:underline underline-offset-4">
             Login

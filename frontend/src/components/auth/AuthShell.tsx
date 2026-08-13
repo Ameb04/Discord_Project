@@ -23,15 +23,20 @@ export function AuthShell({
   return (
     <div className="grid h-dvh grid-cols-1 overflow-hidden lg:grid-cols-2">
       {/* Form column */}
-      <section className="flex h-full min-h-0 flex-col overflow-y-auto px-6 py-6 sm:px-10">
-        <header className="flex items-center justify-between">
+      <section className="flex h-full min-h-0 flex-col px-6 py-5 sm:px-10">
+        {/* `shrink-0`, or a form taller than the column squeezes the header to
+            nothing and the wordmark paints straight over the card title. */}
+        <header className="flex shrink-0 items-center justify-between">
           <Link to="/" aria-label="Go to home">
             <BrandMark />
           </Link>
         </header>
 
-        <div className="flex min-h-0 flex-1 items-center justify-center py-6">
-          <AnimatedContent direction="up" distance={20} className="w-full max-w-md">
+        {/* Auto margins centre the card while there is room and collapse to
+            zero when there is not, so a short viewport scrolls to the top of
+            the form instead of clipping it — which `items-center` would. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain py-4">
+          <AnimatedContent direction="up" distance={20} className="m-auto w-full max-w-md">
             {children}
           </AnimatedContent>
         </div>

@@ -155,6 +155,7 @@ function HomePage() {
             title={selectedTitle}
             subtitle={selectedSubtitle}
             group={selectedGroup}
+            directPeer={selectedPrivateChat?.other_user}
             onGroupChanged={refreshConversations}
             onGroupDeleted={() => {
               refreshConversations();
