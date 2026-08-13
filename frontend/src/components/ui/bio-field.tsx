@@ -1,5 +1,6 @@
 import { useId } from "react";
 
+import { CharacterCounter } from "@/components/ui/character-counter";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { BIO_MAX_LENGTH, BIO_WARN_REMAINING } from "@/lib/profile";
@@ -33,23 +34,16 @@ function BioField({
   const fieldId = useId();
   const counterId = useId();
 
-  const remaining = BIO_MAX_LENGTH - value.length;
-  const isNearLimit = remaining <= BIO_WARN_REMAINING;
-
   return (
     <div className={cn("grid gap-2", className)}>
       <div className="flex items-baseline justify-between gap-3">
         <Label htmlFor={fieldId}>{label}</Label>
-        <span
+        <CharacterCounter
           id={counterId}
-          aria-live="polite"
-          className={cn(
-            "text-xs tabular-nums",
-            isNearLimit ? "text-amber-300/90" : "text-muted-foreground/70"
-          )}
-        >
-          {value.length}/{BIO_MAX_LENGTH}
-        </span>
+          value={value}
+          max={BIO_MAX_LENGTH}
+          warnRemaining={BIO_WARN_REMAINING}
+        />
       </div>
       <Textarea
         id={fieldId}
