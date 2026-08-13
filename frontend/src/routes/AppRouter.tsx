@@ -5,6 +5,7 @@ import Navbar from "../components/Navbar";
 import SearchResultsPage from "../pages/SearchResultsPage";
 import SettingsPage from "../pages/SettingsPage";
 import HomePage from "../pages/HomePage";
+import JoinChannelPage from "../pages/JoinChannelPage";
 import JoinGroupPage from "../pages/JoinGroupPage";
 import { LandingPage } from "../pages/LandingPage";
 import { LoginPage } from "../pages/LoginPage";
@@ -96,8 +97,12 @@ export function AppRouter() {
           <Route path="/scheduled" element={<ScheduledMessagesPage />} />
           <Route path="/profile/:phone_number" element={<ProfilePage />} />
           <Route path="/chats/:chatId" element={<HomePage />} />
+          <Route path="/channels/:channelId" element={<HomePage />} />
           {/* Signed-in only: joining needs an account, and the redirect back
-              to /login preserves nothing, so the link is shown after auth. */}
+              to /login preserves nothing, so the link is shown after auth.
+              The channel route sits first so "channel" is never read as a
+              group token. */}
+          <Route path="/join/channel/:token" element={<JoinChannelPage />} />
           <Route path="/join/:token" element={<JoinGroupPage />} />
         </Route>
       </Route>

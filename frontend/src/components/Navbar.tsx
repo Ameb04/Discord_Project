@@ -24,7 +24,10 @@ function Navbar() {
     {
       label: "Home",
       to: "/home",
-      active: pathname === "/home" || pathname.startsWith("/chats/"),
+      active:
+        pathname === "/home" ||
+        pathname.startsWith("/chats/") ||
+        pathname.startsWith("/channels/"),
       icon: House,
     },
     {
