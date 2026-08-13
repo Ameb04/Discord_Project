@@ -6,24 +6,21 @@ export type Tag = {
   for_humans: boolean;
 };
 
+/**
+ * The signed-in user's own profile, as returned by `GET /api/auth/me/`.
+ *
+ * Fields are optional because the same shape backs the "not loaded yet" state
+ * in `AuthContext`. `tag` arrives as a bare id from this endpoint but as a
+ * nested object from the public profile endpoint, so both are accepted.
+ */
 export type User = {
-  id?: number | string;
-  username?: string;
-  display_name?: string;
-  avatar_url?: string | null;
-
+  phone_number?: string;
   first_name?: string;
   last_name?: string;
-
-  full_name?: string;
-  phone_number?: string;
   gender?: Gender;
-
   can_be_added_to_group?: boolean;
+  avatar_url?: string | null;
   tag?: number | Tag | null;
-
-  created_at?: string;
-  updated_at?: string;
 };
 
 export interface RegisterPayload {
@@ -42,12 +39,6 @@ export interface LoginPayload {
 export interface ChangePasswordPayload {
   current_password: string;
   new_password: string;
-}
-
-export interface AuthResponse {
-  user?: User;
-  message?: string;
-  detail?: string;
 }
 
 export type PublicUser = {

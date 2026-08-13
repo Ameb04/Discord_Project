@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import Navbar from "../components/Navbar";
@@ -15,7 +15,7 @@ function LoadingScreen() {
   return (
     <div className="grid min-h-dvh place-items-center">
       <div className="flex items-center gap-3 rounded-2xl border border-border bg-card/60 px-5 py-4 text-sm text-muted-foreground shadow-2xl shadow-black/30 backdrop-blur-sm">
-        <Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" />
+        <LoaderCircle className="size-4 animate-spin text-primary" aria-hidden="true" />
         Loading...
       </div>
     </div>
@@ -47,9 +47,17 @@ function ProtectedRoute() {
   return <Outlet />;
 }
 
+/**
+ * Chrome shared by every signed-in page.
+ *
+ * The shell is pinned to the viewport (`h-dvh`) and the content region owns the
+ * only scrollbar. That gives descendants a *definite* height to resolve against,
+ * which is what lets the chat pane size itself with `h-full` and keep its
+ * composer on screen instead of scrolling away with the message list.
+ */
 function AppLayout() {
   return (
-    <div className="flex min-h-dvh flex-col">
+    <div className="flex h-dvh flex-col overflow-hidden">
       <Navbar />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Outlet />

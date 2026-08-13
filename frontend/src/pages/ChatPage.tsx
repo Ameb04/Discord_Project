@@ -1,12 +1,15 @@
 import {
   ArrowDown,
-  Clock3,
-  Loader2,
+  ArrowLeft,
+  Hash,
+  LoaderCircle,
   MessageCircle,
   Search,
   SearchX,
   WifiOff,
+  X,
 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   useEffect,
   useMemo,
@@ -15,14 +18,19 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { Link } from "react-router-dom";
+
 import { getChatMessageContext, getChatMessages, searchChatMessages } from "../api/chats";
 import { chatWebSocketUrl, parseLiveMessageEvent } from "../api/chatSocket";
 import MessageComposer from "../components/chat/MessageComposer";
 import MessageList from "../components/chat/MessageList";
+import { AnimatedListItem, AnimatedListPresence } from "@/components/motion/AnimatedList";
+import { overlayTransition } from "@/components/motion/transitions";
 import { Skeleton } from "../components/ui/skeleton";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
+import { formatMessageTimestamp, personDisplayName } from "@/lib/format";
 import type { ChatMessage, ChatSearchResult } from "../types/chat";
 
 type ChatPageProps = {
@@ -77,23 +85,6 @@ function extractChatError(error: unknown) {
   return "Unable to load this chat right now.";
 }
 
-function formatSentAt(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function displayName(result: ChatSearchResult) {
-  if (!result.sender) return "Unknown user";
-  const fullName = `${result.sender.first_name} ${result.sender.last_name}`.trim();
-  return fullName || result.sender.phone_number;
-}
-
 function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
   const { user } = useAuth();
   const messageRefs = useRef<Record<number, HTMLLIElement | null>>({});
@@ -106,6 +97,7 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
   const [liveConnectionState, setLiveConnectionState] =
     useState<LiveConnectionState>("connecting");
 
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
@@ -115,6 +107,13 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
 
   const fallbackTitle = useMemo(() => `Chat #${chatId}`, [chatId]);
   const trimmedSearchQuery = searchQuery.trim();
+
+  function resetSearch() {
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchedQuery("");
+    setSearchError("");
+  }
 
   useEffect(() => {
     let isCurrent = true;
@@ -126,6 +125,8 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
       setSearchError("");
       setSearchResults([]);
       setSearchedQuery("");
+      setSearchQuery("");
+      setIsSearchOpen(false);
       setHighlightMessageId(null);
 
       try {
@@ -168,12 +169,21 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
         setMessages((currentMessages) =>
           mergeMessagesById(currentMessages, history.results)
         );
-        setHasOlderMessages((currentValue) =>
-          currentValue || history.has_older
-        );
+        setHasOlderMessages((currentValue) => currentValue || history.has_older);
       } catch {
         // REST loading and sending stay usable if reconnect catch-up fails.
       }
+    }
+
+    function scheduleReconnect() {
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        setLiveConnectionState("disconnected");
+        return;
+      }
+      const delay = Math.min(1000 * 2 ** reconnectAttempts, 10000);
+      reconnectAttempts += 1;
+      setLiveConnectionState("reconnecting");
+      reconnectTimer = setTimeout(connect, delay);
     }
 
     function connect() {
@@ -186,14 +196,7 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
         socket = new WebSocket(chatWebSocketUrl(chatId));
       } catch {
         shouldCatchUp = true;
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-          setLiveConnectionState("disconnected");
-          return;
-        }
-        const delay = Math.min(1000 * 2 ** reconnectAttempts, 10000);
-        reconnectAttempts += 1;
-        setLiveConnectionState("reconnecting");
-        reconnectTimer = setTimeout(connect, delay);
+        scheduleReconnect();
         return;
       }
 
@@ -231,19 +234,13 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
         if (disposed) return;
 
         shouldCatchUp = true;
+        // 4401/4403 are the consumer's "not signed in" / "not a member" codes.
+        // Retrying those would just replay the same rejection.
         if (event.code === 4401 || event.code === 4403) {
           setLiveConnectionState("disconnected");
           return;
         }
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-          setLiveConnectionState("disconnected");
-          return;
-        }
-
-        const delay = Math.min(1000 * 2 ** reconnectAttempts, 10000);
-        reconnectAttempts += 1;
-        setLiveConnectionState("reconnecting");
-        reconnectTimer = setTimeout(connect, delay);
+        scheduleReconnect();
       };
     }
 
@@ -262,9 +259,7 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
   useEffect(() => {
     if (highlightMessageId == null) return;
     const node = messageRefs.current[highlightMessageId];
-    if (node) {
-      node.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
+    node?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [highlightMessageId, messages]);
 
   function handleMessageSent(message: ChatMessage) {
@@ -290,9 +285,7 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
       const oldestMessageId = messages[0]?.id;
       if (!oldestMessageId) return;
 
-      const history = await getChatMessages(chatId, {
-        before: oldestMessageId,
-      });
+      const history = await getChatMessages(chatId, { before: oldestMessageId });
 
       if (history.results.length > 0) {
         setMessages((currentMessages) => {
@@ -342,6 +335,7 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
       setMessages(context.results);
       setHasOlderMessages(context.has_older);
       setHighlightMessageId(context.focus_message_id);
+      setIsSearchOpen(false);
     } catch (err) {
       setError(extractChatError(err));
     }
@@ -349,220 +343,281 @@ function ChatPage({ chatId, title, subtitle }: ChatPageProps) {
 
   function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Escape") {
-      setSearchQuery("");
-      setSearchResults([]);
-      setSearchedQuery("");
-      setSearchError("");
+      resetSearch();
     }
   }
 
-  const emptySearchState = searchedQuery && !isSearching && searchResults.length === 0 && !searchError;
+  const emptySearchState =
+    searchedQuery && !isSearching && searchResults.length === 0 && !searchError;
   const emptyHistory = !isLoading && !error && messages.length === 0;
+  const searchDisabled = isLoading || Boolean(error);
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card/50 shadow-2xl shadow-black/30 backdrop-blur-sm">
-      <header className="flex items-center gap-4 border-b border-border px-5 py-4 sm:px-6">
-        <div className="bg-brand-gradient grid size-11 shrink-0 place-items-center rounded-2xl text-white shadow-lg shadow-primary/25">
+      <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-3 sm:gap-4 sm:px-6 sm:py-4">
+        {/* On phones the list and the conversation are separate screens, so the
+            conversation needs its own way back. */}
+        <Button
+          asChild
+          variant="ghost"
+          size="icon"
+          className="size-9 shrink-0 lg:hidden"
+        >
+          <Link to="/home" aria-label="Back to conversations">
+            <ArrowLeft className="size-4.5" aria-hidden="true" />
+          </Link>
+        </Button>
+
+        <div className="bg-brand-gradient hidden size-11 shrink-0 place-items-center rounded-2xl text-white shadow-lg shadow-primary/25 sm:grid">
           <MessageCircle className="size-5" aria-hidden="true" />
         </div>
 
-        <div className="min-w-0">
-          <h1 className="truncate text-lg font-semibold text-foreground">
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">
             {title ?? fallbackTitle}
           </h1>
           {subtitle ? (
-            <p className="mt-0.5 truncate text-sm text-muted-foreground">{subtitle}</p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground sm:text-sm">
+              {subtitle}
+            </p>
           ) : null}
-          <p className="mt-0.5 text-xs text-muted-foreground/70">
+          <p className="mt-0.5 truncate text-xs text-muted-foreground/70">
             {isLoading
               ? "Loading messages..."
               : `${messages.length} ${messages.length === 1 ? "message" : "messages"}`}
+            {liveConnectionState === "reconnecting" ? (
+              <span className="ml-2 inline-flex items-center gap-1 text-amber-200/80">
+                <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
+                Reconnecting...
+              </span>
+            ) : liveConnectionState === "disconnected" ? (
+              <span className="ml-2 inline-flex items-center gap-1">
+                <WifiOff className="size-3" aria-hidden="true" />
+                Live updates unavailable
+              </span>
+            ) : null}
           </p>
-          {liveConnectionState === "reconnecting" ? (
-            <p className="mt-1 flex items-center gap-1.5 text-xs text-amber-200/80">
-              <Loader2 className="size-3 animate-spin" aria-hidden="true" />
-              Reconnecting live updates...
-            </p>
-          ) : liveConnectionState === "disconnected" ? (
-            <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <WifiOff className="size-3" aria-hidden="true" />
-              Live updates unavailable. Reopen the chat to retry.
-            </p>
-          ) : null}
         </div>
+
+        <Button
+          type="button"
+          variant={isSearchOpen ? "default" : "outline"}
+          size="icon"
+          className="size-9 shrink-0"
+          disabled={searchDisabled}
+          aria-expanded={isSearchOpen}
+          aria-label={isSearchOpen ? "Close message search" : "Search messages"}
+          onClick={() => {
+            setIsSearchOpen((open) => !open);
+            if (isSearchOpen) resetSearch();
+          }}
+        >
+          {isSearchOpen ? (
+            <X className="size-4" aria-hidden="true" />
+          ) : (
+            <Search className="size-4" aria-hidden="true" />
+          )}
+        </Button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="border-b border-border px-5 py-4 sm:px-6">
-          <form className="flex flex-col gap-3 md:flex-row" onSubmit={handleSearchSubmit}>
-            <div className="relative min-w-0 flex-1">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="Search messages in this chat"
-                disabled={isLoading || Boolean(error) || isSearching}
-                className="h-11 pl-10"
-              />
-            </div>
-            <Button type="submit" disabled={isLoading || Boolean(error) || isSearching || !trimmedSearchQuery}>
-              {isSearching ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Searching...
-                </>
-              ) : (
-                "Search"
-              )}
-            </Button>
-          </form>
-
-          {searchError ? (
-            <div
-              role="alert"
-              className="mt-3 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-red-100"
-            >
-              {searchError}
-            </div>
-          ) : null}
-
-          {!searchError && searchedQuery ? (
-            <div className="mt-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">Search results</p>
-                  <p className="text-xs text-muted-foreground">
-                    {isSearching
-                      ? "Looking for matching messages..."
-                      : `${searchResults.length} result${searchResults.length === 1 ? "" : "s"} for "${searchedQuery}"`}
-                  </p>
+      <AnimatePresence initial={false}>
+        {isSearchOpen ? (
+          <motion.div
+            key="search"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={overlayTransition}
+            className="shrink-0 overflow-hidden border-b border-border"
+          >
+            <div className="max-h-[45dvh] overflow-y-auto px-3 py-3 sm:px-6 sm:py-4">
+              <form
+                className="flex flex-col gap-2 sm:flex-row sm:gap-3"
+                onSubmit={handleSearchSubmit}
+              >
+                <div className="relative min-w-0 flex-1">
+                  <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    autoFocus
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    onKeyDown={handleSearchKeyDown}
+                    placeholder="Search messages in this chat"
+                    disabled={searchDisabled || isSearching}
+                    className="h-11 pl-10"
+                  />
                 </div>
-                {searchResults.length > 0 ? (
-                  <span className="text-xs text-muted-foreground">
-                    Click a result to jump there
-                  </span>
-                ) : null}
-              </div>
+                <Button
+                  type="submit"
+                  disabled={searchDisabled || isSearching || !trimmedSearchQuery}
+                >
+                  {isSearching ? (
+                    <>
+                      <LoaderCircle className="size-4 animate-spin" />
+                      Searching...
+                    </>
+                  ) : (
+                    "Search"
+                  )}
+                </Button>
+              </form>
 
-              {isSearching ? (
-                <div className="grid gap-2">
-                  <Skeleton className="h-20 w-full rounded-2xl" />
-                  <Skeleton className="h-20 w-full rounded-2xl" />
+              {searchError ? (
+                <div
+                  role="alert"
+                  className="mt-3 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-red-100"
+                >
+                  {searchError}
                 </div>
-              ) : emptySearchState ? (
-                <div className="flex items-center gap-3 rounded-2xl border border-dashed border-border bg-white/[0.02] px-4 py-5">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary">
-                    <SearchX className="size-5" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="font-medium text-foreground">No messages matched</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Try another keyword or phrase from this conversation.
-                    </p>
+              ) : null}
+
+              {!searchError && searchedQuery ? (
+                <div className="mt-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">
+                        Search results
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {isSearching
+                          ? "Looking for matching messages..."
+                          : `${searchResults.length} result${searchResults.length === 1 ? "" : "s"} for "${searchedQuery}"`}
+                      </p>
+                    </div>
+                    {searchResults.length > 0 ? (
+                      <span className="text-xs text-muted-foreground">
+                        Click a result to jump there
+                      </span>
+                    ) : null}
                   </div>
+
+                  {isSearching ? (
+                    <div className="grid gap-2">
+                      <Skeleton className="h-20 w-full rounded-2xl" />
+                      <Skeleton className="h-20 w-full rounded-2xl" />
+                    </div>
+                  ) : emptySearchState ? (
+                    <div className="flex items-center gap-3 rounded-2xl border border-dashed border-border bg-white/[0.02] px-4 py-5">
+                      <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary">
+                        <SearchX className="size-5" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground">
+                          No messages matched
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Try another keyword or phrase from this conversation.
+                        </p>
+                      </div>
+                    </div>
+                  ) : searchResults.length > 0 ? (
+                    <ul className="grid gap-2">
+                      <AnimatedListPresence>
+                        {searchResults.map((result, index) => (
+                          <AnimatedListItem key={result.id} index={index}>
+                            <button
+                              type="button"
+                              onClick={() => void handleOpenSearchResult(result.id)}
+                              className="w-full rounded-2xl border border-border bg-white/[0.03] px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/10"
+                            >
+                              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                <p className="truncate font-medium text-foreground">
+                                  {personDisplayName(result.sender)}
+                                </p>
+                                <time
+                                  className="text-xs text-muted-foreground"
+                                  dateTime={result.sent_at}
+                                >
+                                  {formatMessageTimestamp(result.sent_at)}
+                                </time>
+                              </div>
+                              <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+                                {result.preview}
+                              </p>
+                              <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground/70">
+                                <Hash className="size-3.5" />
+                                <span>Message #{result.id}</span>
+                                {result.is_edited ? <span>· edited</span> : null}
+                              </div>
+                            </button>
+                          </AnimatedListItem>
+                        ))}
+                      </AnimatedListPresence>
+                    </ul>
+                  ) : null}
                 </div>
-              ) : searchResults.length > 0 ? (
-                <ul className="grid gap-2">
-                  {searchResults.map((result) => {
-                    const senderName = displayName(result);
-                    return (
-                      <li key={result.id}>
-                        <button
-                          type="button"
-                          onClick={() => void handleOpenSearchResult(result.id)}
-                          className="w-full rounded-2xl border border-border bg-white/[0.03] px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/10"
-                        >
-                          <div className="flex flex-wrap items-baseline justify-between gap-2">
-                            <p className="truncate font-medium text-foreground">{senderName}</p>
-                            <time className="text-xs text-muted-foreground" dateTime={result.sent_at}>
-                              {formatSentAt(result.sent_at)}
-                            </time>
-                          </div>
-                          <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
-                            {result.preview}
-                          </p>
-                          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground/70">
-                            <Clock3 className="size-3.5" />
-                            <span>Message #{result.id}</span>
-                            {result.is_edited ? <span>· edited</span> : null}
-                          </div>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
               ) : null}
             </div>
-          ) : null}
-        </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
-        <div className="px-5 py-5 sm:px-6">
-          {isLoading ? (
-            <div className="grid gap-4" aria-label="Loading messages">
-              <Skeleton className="h-20 w-3/4" />
-              <Skeleton className="ml-auto h-24 w-2/3" />
-              <Skeleton className="h-16 w-1/2" />
-            </div>
-          ) : null}
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-5">
+        {isLoading ? (
+          <div className="grid gap-4" aria-label="Loading messages">
+            <Skeleton className="h-20 w-3/4" />
+            <Skeleton className="ml-auto h-24 w-2/3" />
+            <Skeleton className="h-16 w-1/2" />
+          </div>
+        ) : null}
 
-          {!isLoading && error ? (
-            <div
-              role="alert"
-              className="rounded-2xl border border-destructive/25 bg-destructive/10 px-5 py-4 text-sm text-red-100"
+        {!isLoading && error ? (
+          <div
+            role="alert"
+            className="rounded-2xl border border-destructive/25 bg-destructive/10 px-5 py-4 text-sm text-red-100"
+          >
+            {error}
+          </div>
+        ) : null}
+
+        {!isLoading && !error && hasOlderMessages ? (
+          <div className="mb-5 flex justify-center">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isLoadingOlder}
+              onClick={() => void handleLoadOlder()}
             >
-              {error}
-            </div>
-          ) : null}
+              {isLoadingOlder ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Loading older...
+                </>
+              ) : (
+                <>
+                  <ArrowDown className="size-4" />
+                  Load older messages
+                </>
+              )}
+            </Button>
+          </div>
+        ) : null}
 
-          {!isLoading && !error && hasOlderMessages ? (
-            <div className="mb-5 flex justify-center">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isLoadingOlder}
-                onClick={() => void handleLoadOlder()}
-              >
-                {isLoadingOlder ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" />
-                    Loading older...
-                  </>
-                ) : (
-                  <>
-                    <ArrowDown className="size-4" />
-                    Load older messages
-                  </>
-                )}
-              </Button>
+        {!isLoading && !error && emptyHistory ? (
+          <div className="grid min-h-56 place-items-center rounded-2xl border border-dashed border-border bg-white/[0.02] px-6 text-center sm:min-h-80">
+            <div>
+              <span className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
+                <MessageCircle className="size-6" aria-hidden="true" />
+              </span>
+              <p className="font-medium text-foreground">No messages yet</p>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
+                Messages for this conversation will appear here once the chat
+                starts.
+              </p>
             </div>
-          ) : null}
+          </div>
+        ) : null}
 
-          {!isLoading && !error && emptyHistory ? (
-            <div className="grid min-h-80 place-items-center rounded-2xl border border-dashed border-border bg-white/[0.02] px-6 text-center">
-              <div>
-                <span className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
-                  <MessageCircle className="size-6" aria-hidden="true" />
-                </span>
-                <p className="font-medium text-foreground">No messages yet</p>
-                <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
-                  Messages for this conversation will appear here once the chat starts.
-                </p>
-              </div>
-            </div>
-          ) : null}
-
-          {!isLoading && !error && messages.length > 0 ? (
-            <MessageList
-              messages={messages}
-              currentUser={user}
-              onMessageEdited={handleMessageEdited}
-              highlightMessageId={highlightMessageId}
-              messageRefs={messageRefs}
-            />
-          ) : null}
-        </div>
+        {!isLoading && !error && messages.length > 0 ? (
+          <MessageList
+            messages={messages}
+            currentUser={user}
+            onMessageEdited={handleMessageEdited}
+            highlightMessageId={highlightMessageId}
+            messageRefs={messageRefs}
+          />
+        ) : null}
       </div>
 
       {error ? null : (

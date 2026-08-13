@@ -25,6 +25,62 @@ from .models import Message, NormalMessage
 from .services import create_media_message, create_text_message, edit_message
 
 
+class AuthenticatedClientMixin:
+    """Session-authenticated API clients, the way the app authenticates."""
+
+    def authenticated_client(self, user):
+        client = APIClient()
+        session = client.session
+        session[APP_USER_SESSION_KEY] = user.pk
+        session.save()
+        return client
+
+
+class PrivateMediaTestMixin:
+    """Route attachment storage into a throwaway directory for one test.
+
+    ``USE_S3`` is pinned off here on purpose. It is environment-driven, and the
+    docker image that runs the suite sets it to ``True`` — without this pin the
+    service under test would write to the shared MinIO bucket while these
+    assertions looked at the local filesystem, so the suite would pass or fail
+    depending on where it happened to run.
+    """
+
+    def setUp(self):
+        self.temp_dir = TemporaryDirectory()
+        self.private_root = Path(self.temp_dir.name) / "private"
+        self.public_root = Path(self.temp_dir.name) / "media"
+        settings_override = override_settings(
+            USE_S3=False,
+            PRIVATE_MEDIA_ROOT=self.private_root,
+            MEDIA_ROOT=self.public_root,
+        )
+        settings_override.enable()
+        self.addCleanup(settings_override.disable)
+        self.addCleanup(self.temp_dir.cleanup)
+        super().setUp()
+
+    def upload(self, name, content, content_type):
+        return SimpleUploadedFile(name, content, content_type=content_type)
+
+    def private_path(self, stored_file):
+        return (Path(settings.PRIVATE_MEDIA_ROOT) / stored_file.storage_path).resolve()
+
+    def assert_private_file_exists(self, stored_file):
+        self.assertTrue(self.private_path(stored_file).exists())
+
+    def stored_private_files(self):
+        if not self.private_root.exists():
+            return []
+        return [path for path in self.private_root.rglob("*") if path.is_file()]
+
+    def assert_no_messages_files_or_private_uploads(self):
+        self.assertEqual(Message.objects.count(), 0)
+        self.assertEqual(NormalMessage.objects.count(), 0)
+        self.assertEqual(File.objects.count(), 0)
+        self.assertEqual(self.stored_private_files(), [])
+
+
 class TextMessageCreationServiceTests(TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(
@@ -142,7 +198,7 @@ class TextMessageCreationServiceTests(TestCase):
         self.assertEqual(NormalMessage.objects.count(), 0)
 
 
-class MessageListCreateApiTests(TestCase):
+class MessageListCreateApiTests(AuthenticatedClientMixin, TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(
             phone_number="1000", password="password"
@@ -153,13 +209,6 @@ class MessageListCreateApiTests(TestCase):
         self.third_user = User.objects.create_user(
             phone_number="3000", password="password"
         )
-
-    def authenticated_client(self, user):
-        client = APIClient()
-        session = client.session
-        session[APP_USER_SESSION_KEY] = user.pk
-        session.save()
-        return client
 
     def messages_url(self, chat):
         return f"/api/chats/{chat.pk}/messages/"
@@ -326,19 +375,11 @@ class MessageListCreateApiTests(TestCase):
         )
 
 
-class MediaMessageUploadApiTests(TestCase):
+class MediaMessageUploadApiTests(
+    PrivateMediaTestMixin, AuthenticatedClientMixin, TestCase
+):
     def setUp(self):
-        self.temp_dir = TemporaryDirectory()
-        self.private_root = Path(self.temp_dir.name) / "private"
-        self.public_root = Path(self.temp_dir.name) / "media"
-        self.settings_override = override_settings(
-            PRIVATE_MEDIA_ROOT=self.private_root,
-            MEDIA_ROOT=self.public_root,
-        )
-        self.settings_override.enable()
-        self.addCleanup(self.settings_override.disable)
-        self.addCleanup(self.temp_dir.cleanup)
-
+        super().setUp()
         self.owner = User.objects.create_user(
             phone_number="1000", password="password"
         )
@@ -348,13 +389,6 @@ class MediaMessageUploadApiTests(TestCase):
         self.third_user = User.objects.create_user(
             phone_number="3000", password="password"
         )
-
-    def authenticated_client(self, user):
-        client = APIClient()
-        session = client.session
-        session[APP_USER_SESSION_KEY] = user.pk
-        session.save()
-        return client
 
     def media_url(self, chat):
         return f"/api/chats/{chat.pk}/messages/media/"
@@ -531,37 +565,12 @@ class MediaMessageUploadApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assert_no_messages_files_or_private_uploads()
 
-    def upload(self, name, content, content_type):
-        return SimpleUploadedFile(name, content, content_type=content_type)
 
-    def private_path(self, stored_file):
-        return (Path(settings.PRIVATE_MEDIA_ROOT) / stored_file.storage_path).resolve()
-
-    def assert_private_file_exists(self, stored_file):
-        self.assertTrue(self.private_path(stored_file).exists())
-
-    def assert_no_messages_files_or_private_uploads(self):
-        self.assertEqual(Message.objects.count(), 0)
-        self.assertEqual(NormalMessage.objects.count(), 0)
-        self.assertEqual(File.objects.count(), 0)
-        if self.private_root.exists():
-            stored_paths = [path for path in self.private_root.rglob("*") if path.is_file()]
-            self.assertEqual(stored_paths, [])
-
-
-class AttachmentDownloadApiTests(TestCase):
+class AttachmentDownloadApiTests(
+    PrivateMediaTestMixin, AuthenticatedClientMixin, TestCase
+):
     def setUp(self):
-        self.temp_dir = TemporaryDirectory()
-        self.private_root = Path(self.temp_dir.name) / "private"
-        self.public_root = Path(self.temp_dir.name) / "media"
-        self.settings_override = override_settings(
-            PRIVATE_MEDIA_ROOT=self.private_root,
-            MEDIA_ROOT=self.public_root,
-        )
-        self.settings_override.enable()
-        self.addCleanup(self.settings_override.disable)
-        self.addCleanup(self.temp_dir.cleanup)
-
+        super().setUp()
         self.owner = User.objects.create_user(
             phone_number="1000", password="password"
         )
@@ -571,13 +580,6 @@ class AttachmentDownloadApiTests(TestCase):
         self.third_user = User.objects.create_user(
             phone_number="3000", password="password"
         )
-
-    def authenticated_client(self, user):
-        client = APIClient()
-        session = client.session
-        session[APP_USER_SESSION_KEY] = user.pk
-        session.save()
-        return client
 
     def attachment_url(self, message):
         return f"/api/messages/{message.pk}/attachment/"
@@ -711,29 +713,13 @@ class AttachmentDownloadApiTests(TestCase):
         self.assertNotIn(str(settings.PRIVATE_MEDIA_ROOT), response_text)
         self.assertNotIn(str(settings.MEDIA_ROOT), response_text)
 
-    def upload(self, name, content, content_type):
-        return SimpleUploadedFile(name, content, content_type=content_type)
-
-    def private_path(self, stored_file):
-        return (Path(settings.PRIVATE_MEDIA_ROOT) / stored_file.storage_path).resolve()
-
     def response_bytes(self, response):
         return b"".join(response.streaming_content)
 
 
-class MediaMessageCreationServiceTests(TestCase):
+class MediaMessageCreationServiceTests(PrivateMediaTestMixin, TestCase):
     def setUp(self):
-        self.temp_dir = TemporaryDirectory()
-        self.private_root = Path(self.temp_dir.name) / "private"
-        self.public_root = Path(self.temp_dir.name) / "media"
-        self.settings_override = override_settings(
-            PRIVATE_MEDIA_ROOT=self.private_root,
-            MEDIA_ROOT=self.public_root,
-        )
-        self.settings_override.enable()
-        self.addCleanup(self.settings_override.disable)
-        self.addCleanup(self.temp_dir.cleanup)
-
+        super().setUp()
         self.owner = User.objects.create_user(
             phone_number="1000", password="password"
         )
@@ -916,43 +902,16 @@ class MediaMessageCreationServiceTests(TestCase):
         self.assertEqual(self.private_path(first.file).read_bytes(), b"first")
         self.assertEqual(self.private_path(second.file).read_bytes(), b"second")
 
-    def upload(self, name, content, content_type):
-        return SimpleUploadedFile(name, content, content_type=content_type)
-
     def create_authorized_pv(self):
         pv = Pv.objects.create(name="Direct chat")
         PvMembership.objects.create(pv=pv, user=self.owner)
         PvMembership.objects.create(pv=pv, user=self.member)
         return pv
 
-    def private_path(self, stored_file):
-        return (Path(settings.PRIVATE_MEDIA_ROOT) / stored_file.storage_path).resolve()
 
-    def assert_private_file_exists(self, stored_file):
-        self.assertTrue(self.private_path(stored_file).exists())
-
-    def assert_no_messages_files_or_private_uploads(self):
-        self.assertEqual(Message.objects.count(), 0)
-        self.assertEqual(NormalMessage.objects.count(), 0)
-        self.assertEqual(File.objects.count(), 0)
-        if self.private_root.exists():
-            stored_paths = [path for path in self.private_root.rglob("*") if path.is_file()]
-            self.assertEqual(stored_paths, [])
-
-
-class EditMessageServiceTests(TestCase):
+class EditMessageServiceTests(PrivateMediaTestMixin, TestCase):
     def setUp(self):
-        self.temp_dir = TemporaryDirectory()
-        self.private_root = Path(self.temp_dir.name) / "private"
-        self.public_root = Path(self.temp_dir.name) / "media"
-        self.settings_override = override_settings(
-            PRIVATE_MEDIA_ROOT=self.private_root,
-            MEDIA_ROOT=self.public_root,
-        )
-        self.settings_override.enable()
-        self.addCleanup(self.settings_override.disable)
-        self.addCleanup(self.temp_dir.cleanup)
-
+        super().setUp()
         self.owner = User.objects.create_user(
             phone_number="1000", password="password"
         )
@@ -1082,17 +1041,8 @@ class EditMessageServiceTests(TestCase):
         with self.assertRaises(ValidationError):
             edit_message(self.owner, self.pv, 9999, content="nothing here")
 
-    def upload(self, name, content, content_type):
-        return SimpleUploadedFile(name, content, content_type=content_type)
 
-    def private_path(self, stored_file):
-        return (Path(settings.PRIVATE_MEDIA_ROOT) / stored_file.storage_path).resolve()
-
-    def assert_private_file_exists(self, stored_file):
-        self.assertTrue(self.private_path(stored_file).exists())
-
-
-class MessageHistorySearchApiTests(TestCase):
+class MessageHistorySearchApiTests(AuthenticatedClientMixin, TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(
             phone_number="1000", password="password"
@@ -1103,13 +1053,6 @@ class MessageHistorySearchApiTests(TestCase):
         self.third_user = User.objects.create_user(
             phone_number="3000", password="password"
         )
-
-    def authenticated_client(self, user):
-        client = APIClient()
-        session = client.session
-        session[APP_USER_SESSION_KEY] = user.pk
-        session.save()
-        return client
 
     def create_pv(self):
         pv = Pv.objects.create(name="Direct chat")

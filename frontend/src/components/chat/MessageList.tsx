@@ -1,4 +1,5 @@
-import type { MutableRefObject } from "react";
+import type { RefObject } from "react";
+
 import type { ChatMessage } from "../../types/chat";
 import type { User } from "../../types/user";
 import MessageItem from "./MessageItem";
@@ -8,7 +9,7 @@ type MessageListProps = {
   currentUser: User | null;
   onMessageEdited: (message: ChatMessage) => void;
   highlightMessageId?: number | null;
-  messageRefs?: MutableRefObject<Record<number, HTMLLIElement | null>>;
+  messageRefs?: RefObject<Record<number, HTMLLIElement | null>>;
 };
 
 function MessageList({
@@ -28,8 +29,13 @@ function MessageList({
           onMessageEdited={onMessageEdited}
           isHighlighted={highlightMessageId === message.id}
           itemRef={(node) => {
-            if (messageRefs) {
+            if (!messageRefs) return;
+            if (node) {
               messageRefs.current[message.id] = node;
+            } else {
+              // Drop the entry instead of leaving a null behind, so the map
+              // does not grow for the lifetime of the conversation.
+              delete messageRefs.current[message.id];
             }
           }}
         />

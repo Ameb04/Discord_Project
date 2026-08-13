@@ -1,12 +1,6 @@
-import { useMemo } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { useState, type ChangeEvent, type KeyboardEvent } from "react";
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { MINUTES_PER_DAY, usesTwelveHourClock } from "@/lib/datetime";
 
@@ -19,23 +13,109 @@ type TimeFieldProps = {
   "aria-label"?: string;
 };
 
-const MINUTE_STEP = 5;
-
 const pad = (value: number) => String(value).padStart(2, "0");
 
-/** Hour labels in the viewer's own clock convention, keyed by 24-hour value. */
-function buildHourOptions(twelveHour: boolean) {
-  return Array.from({ length: 24 }, (_, hour) => ({
-    value: hour,
-    label: twelveHour ? String(hour % 12 || 12) : pad(hour),
-  }));
+/** Keep a value inside `[0, size)`, wrapping in both directions. */
+const wrap = (value: number, size: number) => ((value % size) + size) % size;
+
+type SegmentProps = {
+  label: string;
+  value: number;
+  max: number;
+  disabled: boolean;
+  onCommit: (value: number) => void;
+  onStep: (delta: number) => void;
+};
+
+/**
+ * One editable number box (hour or minute) with its own stepper.
+ *
+ * While the box has focus it shows a raw typing buffer rather than the
+ * formatted value, so clearing the field to type "07" does not fight a control
+ * that re-pads itself between keystrokes. The buffer is dropped on blur, which
+ * also means a value arriving from outside (a quick preset) shows up
+ * immediately whenever the user is not mid-edit.
+ */
+function TimeSegment({
+  label,
+  value,
+  max,
+  disabled,
+  onCommit,
+  onStep,
+}: SegmentProps) {
+  const [buffer, setBuffer] = useState<string | null>(null);
+
+  function handleChange(event: ChangeEvent<HTMLInputElement>) {
+    const digits = event.target.value.replace(/\D/g, "").slice(0, 2);
+    setBuffer(digits);
+    if (digits === "") return;
+    const parsed = Number(digits);
+    if (parsed <= max) onCommit(parsed);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    setBuffer(null);
+    onStep(event.key === "ArrowUp" ? 1 : -1);
+  }
+
+  return (
+    <div className="flex items-stretch">
+      <input
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        aria-label={label}
+        role="spinbutton"
+        aria-valuenow={value}
+        aria-valuemin={0}
+        aria-valuemax={max}
+        value={buffer ?? pad(value)}
+        disabled={disabled}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onFocus={(event) => event.target.select()}
+        onBlur={() => setBuffer(null)}
+        className="h-10 w-12 rounded-l-xl border border-r-0 border-input bg-white/[0.04] text-center text-sm font-medium tabular-nums text-foreground outline-none transition focus-visible:border-ring focus-visible:bg-white/[0.06] focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
+      />
+      <div className="flex flex-col">
+        {[1, -1].map((delta) => (
+          <button
+            key={delta}
+            type="button"
+            tabIndex={-1}
+            disabled={disabled}
+            aria-label={`${delta > 0 ? "Increase" : "Decrease"} ${label.toLowerCase()}`}
+            onClick={() => {
+              setBuffer(null);
+              onStep(delta);
+            }}
+            className={cn(
+              "grid h-5 w-6 place-items-center border border-input text-muted-foreground transition hover:bg-white/[0.08] hover:text-foreground disabled:pointer-events-none disabled:opacity-60",
+              delta > 0 ? "rounded-tr-xl border-b-0" : "rounded-br-xl"
+            )}
+          >
+            {delta > 0 ? (
+              <ChevronUp className="size-3" aria-hidden="true" />
+            ) : (
+              <ChevronDown className="size-3" aria-hidden="true" />
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /**
- * Hour / minute / meridiem selects over a single "minutes since midnight"
- * value. Minutes snap to a 5-minute grid, but an off-grid value handed in by a
- * quick preset ("in 30 minutes" from 10:07) is kept and offered as-is rather
- * than silently rounded away.
+ * Hour / minute editor over a single "minutes since midnight" value.
+ *
+ * Every minute of the day is reachable: type it, or hold an arrow key. An
+ * earlier version offered a dropdown of five-minute steps, which made "20:07"
+ * simply unselectable — a scheduling control that cannot express the time the
+ * user wants is not a scheduling control.
  */
 function TimeField({
   value,
@@ -44,98 +124,78 @@ function TimeField({
   className,
   "aria-label": ariaLabel,
 }: TimeFieldProps) {
-  const hour = Math.floor(value / 60);
+  const hour24 = Math.floor(value / 60);
   const minute = value % 60;
-  const isAfternoon = hour >= 12;
+  const isAfternoon = hour24 >= 12;
+  const displayHour = usesTwelveHourClock ? hour24 % 12 || 12 : hour24;
 
-  const hourOptions = useMemo(
-    () => buildHourOptions(usesTwelveHourClock),
-    []
-  );
-  const visibleHours = useMemo(
-    () =>
-      usesTwelveHourClock
-        ? hourOptions.filter(
-            (option) => option.value >= 12 === isAfternoon
-          )
-        : hourOptions,
-    [hourOptions, isAfternoon]
-  );
+  const commit = (nextHour24: number, nextMinute: number) =>
+    onChange(wrap(nextHour24 * 60 + nextMinute, MINUTES_PER_DAY));
 
-  const minuteOptions = useMemo(() => {
-    const steps = Array.from(
-      { length: 60 / MINUTE_STEP },
-      (_, index) => index * MINUTE_STEP
-    );
-    return steps.includes(minute)
-      ? steps
-      : [...steps, minute].sort((a, b) => a - b);
-  }, [minute]);
-
-  const commit = (nextHour: number, nextMinute: number) =>
-    onChange((nextHour * 60 + nextMinute) % MINUTES_PER_DAY);
+  /** Map a typed 12-hour reading back onto the 24-hour clock. */
+  const toHour24 = (typed: number) =>
+    usesTwelveHourClock ? (typed % 12) + (isAfternoon ? 12 : 0) : wrap(typed, 24);
 
   return (
     <div
-      className={cn("flex items-center gap-2", className)}
+      className={cn("flex items-center gap-1.5", className)}
       role="group"
       aria-label={ariaLabel ?? "Delivery time"}
     >
-      <Select
-        value={String(hour)}
+      <TimeSegment
+        label="Hour"
+        value={displayHour}
+        max={usesTwelveHourClock ? 12 : 23}
         disabled={disabled}
-        onValueChange={(next) => commit(Number(next), minute)}
-      >
-        <SelectTrigger className="h-10 w-[4.5rem] justify-center px-2 tabular-nums">
-          <SelectValue aria-label="Hour" />
-        </SelectTrigger>
-        <SelectContent className="max-h-60">
-          {visibleHours.map((option) => (
-            <SelectItem key={option.value} value={String(option.value)}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        onCommit={(typed) => commit(toHour24(typed), minute)}
+        onStep={(delta) => commit(wrap(hour24 + delta, 24), minute)}
+      />
 
-      <span aria-hidden="true" className="text-muted-foreground">
+      <span aria-hidden="true" className="px-0.5 text-muted-foreground">
         :
       </span>
 
-      <Select
-        value={String(minute)}
+      <TimeSegment
+        label="Minute"
+        value={minute}
+        max={59}
         disabled={disabled}
-        onValueChange={(next) => commit(hour, Number(next))}
-      >
-        <SelectTrigger className="h-10 w-[4.5rem] justify-center px-2 tabular-nums">
-          <SelectValue aria-label="Minute" />
-        </SelectTrigger>
-        <SelectContent className="max-h-60">
-          {minuteOptions.map((option) => (
-            <SelectItem key={option} value={String(option)}>
-              {pad(option)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        onCommit={(typed) => commit(hour24, typed)}
+        // Stepping past the hour boundary should roll the hour, not the minute
+        // alone — so step the whole value rather than the segment.
+        onStep={(delta) => onChange(wrap(value + delta, MINUTES_PER_DAY))}
+      />
 
-      {usesTwelveHourClock && (
-        <Select
-          value={isAfternoon ? "pm" : "am"}
-          disabled={disabled}
-          onValueChange={(next) =>
-            commit((hour % 12) + (next === "pm" ? 12 : 0), minute)
-          }
+      {usesTwelveHourClock ? (
+        <div
+          role="group"
+          aria-label="AM or PM"
+          className="ml-1 flex flex-col overflow-hidden rounded-xl border border-input"
         >
-          <SelectTrigger className="h-10 w-[4.75rem] justify-center px-2">
-            <SelectValue aria-label="AM or PM" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="am">AM</SelectItem>
-            <SelectItem value="pm">PM</SelectItem>
-          </SelectContent>
-        </Select>
-      )}
+          {(["am", "pm"] as const).map((meridiem) => {
+            const isActive = (meridiem === "pm") === isAfternoon;
+            return (
+              <button
+                key={meridiem}
+                type="button"
+                disabled={disabled}
+                aria-pressed={isActive}
+                onClick={() =>
+                  commit((hour24 % 12) + (meridiem === "pm" ? 12 : 0), minute)
+                }
+                className={cn(
+                  "h-5 w-9 text-[0.65rem] font-semibold uppercase transition disabled:pointer-events-none disabled:opacity-60",
+                  isActive
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-white/[0.08] hover:text-foreground"
+                )}
+              >
+                {meridiem}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

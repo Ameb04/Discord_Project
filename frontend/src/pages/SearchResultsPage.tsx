@@ -1,9 +1,14 @@
-import { AlertCircle, SearchX, Users } from "lucide-react";
-import { useState } from "react";
+import { CircleAlert, SearchX, Users } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { searchUsers } from "../api/users";
 import SearchBar from "../components/SearchBar";
 import UserCard from "../components/UserCard";
 import { PageHeader } from "../components/PageHeader";
+import { AnimatedContent } from "@/components/motion/AnimatedContent";
+import {
+  AnimatedListItem,
+  AnimatedListPresence,
+} from "@/components/motion/AnimatedList";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { PublicUser } from "../types/user";
@@ -13,18 +18,21 @@ function EmptyState({
   title,
   hint,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   title: string;
   hint: string;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-white/[0.02] px-6 py-12 text-center">
+    <AnimatedContent
+      direction="up"
+      className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-white/[0.02] px-6 py-12 text-center"
+    >
       <span className="mb-3 grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
         {icon}
       </span>
       <p className="font-medium text-foreground">{title}</p>
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">{hint}</p>
-    </div>
+    </AnimatedContent>
   );
 }
 
@@ -62,14 +70,14 @@ function SearchResultsPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-4xl px-4 py-10 sm:px-6 lg:py-14">
+    <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6 sm:py-10 lg:py-14">
       <PageHeader
         eyebrow="People"
         title="Find people"
         description="Search for another user by their name or phone number, then start a direct chat."
       />
 
-      <Card className="mt-8 p-5 sm:p-6">
+      <Card className="mt-8 p-4 sm:p-6">
         <SearchBar
           value={query}
           disabled={isLoading}
@@ -91,12 +99,12 @@ function SearchResultsPage() {
                 key={key}
                 className="flex items-center gap-4 rounded-2xl border border-border bg-card/40 p-4"
               >
-                <Skeleton className="size-12 rounded-full" />
+                <Skeleton className="size-12 shrink-0 rounded-full" />
                 <div className="flex-1 space-y-2">
                   <Skeleton className="h-4 w-40" />
                   <Skeleton className="h-3 w-28" />
                 </div>
-                <Skeleton className="h-9 w-24 rounded-lg" />
+                <Skeleton className="hidden h-9 w-24 rounded-lg sm:block" />
               </div>
             ))}
           </div>
@@ -107,7 +115,7 @@ function SearchResultsPage() {
             role="alert"
             className="flex items-center gap-2.5 rounded-2xl border border-destructive/25 bg-destructive/10 px-5 py-4 text-sm text-red-100"
           >
-            <AlertCircle className="size-4 shrink-0" />
+            <CircleAlert className="size-4 shrink-0" />
             {error}
           </div>
         )}
@@ -137,9 +145,13 @@ function SearchResultsPage() {
               </span>
             </div>
             <ul className="grid gap-3">
-              {users.map((user) => (
-                <UserCard key={user.phone_number} user={user} />
-              ))}
+              <AnimatedListPresence>
+                {users.map((user, index) => (
+                  <AnimatedListItem key={user.phone_number} index={index}>
+                    <UserCard user={user} />
+                  </AnimatedListItem>
+                ))}
+              </AnimatedListPresence>
             </ul>
           </>
         )}

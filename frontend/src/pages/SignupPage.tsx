@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { KeyRound, Sparkles, User } from "lucide-react";
+import { KeyRound, UserRound, UserRoundPlus } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { AuthShell } from "../components/auth/AuthShell";
@@ -70,7 +70,7 @@ export function SignupPage() {
           <TextField
             label="Full name"
             placeholder="Enter your full name"
-            icon={<User className="size-4" />}
+            icon={<UserRound className="size-4" />}
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
             autoComplete="name"
@@ -99,7 +99,7 @@ export function SignupPage() {
           <FormError message={localError || error} />
 
           <Button type="submit" size="lg" disabled={submitting} className="mt-1 w-full">
-            <Sparkles className="size-4" aria-hidden="true" />
+            <UserRoundPlus className="size-4" aria-hidden="true" />
             {submitting ? "Creating account..." : "Create account"}
           </Button>
         </form>

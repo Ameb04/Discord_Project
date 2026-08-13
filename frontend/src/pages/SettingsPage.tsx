@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  AlertCircle,
-  CheckCircle2,
+  CircleAlert,
+  CircleCheck,
   ImagePlus,
-  LogOut,
+  KeyRound,
   Lock,
+  LogOut,
   Phone,
   Save,
   UserRound,
@@ -20,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -80,10 +82,12 @@ function SettingsPage() {
   const [canBeAdded, setCanBeAdded] = useState(true);
   const [selectedTagId, setSelectedTagId] = useState<number | "">("");
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
 
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -92,9 +96,12 @@ function SettingsPage() {
   const [savedMessage, setSavedMessage] = useState("");
 
   useEffect(() => {
+    let isCurrent = true;
+
     async function loadProfile() {
       try {
         const [profile, availableTags] = await Promise.all([getMe(), getTags()]);
+        if (!isCurrent) return;
         setUser(profile);
         setTags(availableTags);
         setFirstName(profile.first_name ?? "");
@@ -110,12 +117,26 @@ function SettingsPage() {
         );
         setAvatarPreview(profile.avatar_url ?? null);
       } catch {
-        setError("Unable to load your profile.");
+        if (isCurrent) setError("Unable to load your profile.");
+      } finally {
+        if (isCurrent) setIsLoadingProfile(false);
       }
     }
 
     void loadProfile();
+
+    return () => {
+      isCurrent = false;
+    };
   }, []);
+
+  // A preview blob stays alive until it is explicitly revoked; release the
+  // previous one whenever it is replaced, and the last one on unmount.
+  useEffect(() => {
+    const objectUrl = avatarObjectUrl;
+    if (!objectUrl) return;
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [avatarObjectUrl]);
 
   async function handleSave() {
     setIsSaving(true);
@@ -147,6 +168,7 @@ function SettingsPage() {
 
       setUser(updated);
       setAvatarPreview(updated.avatar_url ?? null);
+      setAvatarObjectUrl(null);
       setAvatarFile(null);
       setSavedMessage("Your changes were saved.");
       await refreshMe();
@@ -201,14 +223,37 @@ function SettingsPage() {
   function handleAvatar(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    const previewUrl = URL.createObjectURL(file);
     setAvatarFile(file);
-    setAvatarPreview(URL.createObjectURL(file));
+    setAvatarPreview(previewUrl);
+    setAvatarObjectUrl(previewUrl);
   }
 
+  if (isLoadingProfile) {
+    return (
+      <main className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 sm:py-10 lg:py-14">
+        <PageHeader eyebrow="Account" title="Settings" />
+        <div className="mt-8 grid gap-6" aria-label="Loading your profile">
+          <Skeleton className="h-72 w-full rounded-2xl" />
+          <Skeleton className="h-48 w-full rounded-2xl" />
+        </div>
+      </main>
+    );
+  }
+
+  // A failed load leaves nothing to edit, so say so rather than sitting on a
+  // spinner that will never resolve.
   if (!user) {
     return (
-      <main className="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6 lg:py-14">
-        <p className="text-sm text-muted-foreground">Loading...</p>
+      <main className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 sm:py-10 lg:py-14">
+        <PageHeader eyebrow="Account" title="Settings" />
+        <div
+          role="alert"
+          className="mt-8 flex items-center gap-2.5 rounded-2xl border border-destructive/25 bg-destructive/10 px-5 py-4 text-sm text-red-100"
+        >
+          <CircleAlert className="size-4 shrink-0" />
+          {error || "Unable to load your profile."}
+        </div>
       </main>
     );
   }
@@ -220,7 +265,7 @@ function SettingsPage() {
       .toUpperCase() || "?";
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6 lg:py-14">
+    <main className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 sm:py-10 lg:py-14">
       <PageHeader
         eyebrow="Account"
         title="Settings"
@@ -358,7 +403,7 @@ function SettingsPage() {
               </Button>
               {savedMessage ? (
                 <span className="inline-flex items-center gap-1.5 text-sm text-emerald-300">
-                  <CheckCircle2 className="size-4" />
+                  <CircleCheck className="size-4" />
                   {savedMessage}
                 </span>
               ) : null}
@@ -370,7 +415,7 @@ function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <Lock className="size-4 text-primary" />
+              <KeyRound className="size-4 text-primary" />
               Password
             </CardTitle>
           </CardHeader>
@@ -411,7 +456,7 @@ function SettingsPage() {
               </Button>
               {passwordMessage ? (
                 <span className="inline-flex items-center gap-1.5 text-sm text-emerald-300">
-                  <CheckCircle2 className="size-4" />
+                  <CircleCheck className="size-4" />
                   {passwordMessage}
                 </span>
               ) : null}
@@ -445,7 +490,7 @@ function SettingsPage() {
             role="alert"
             className="flex items-center gap-2.5 rounded-2xl border border-destructive/25 bg-destructive/10 px-5 py-4 text-sm text-red-100"
           >
-            <AlertCircle className="size-4 shrink-0" />
+            <CircleAlert className="size-4 shrink-0" />
             {error}
           </div>
         ) : null}

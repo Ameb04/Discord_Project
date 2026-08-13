@@ -96,7 +96,16 @@ class ScheduledMessageListSerializer(serializers.ModelSerializer):
         except ObjectDoesNotExist:
             direct_chat = None
         if direct_chat is not None:
-            other_user = direct_chat.members.exclude(pk=obj.sender_id).first()
+            # Iterate the prefetched members rather than filtering in SQL, so a
+            # list of N messages stays one query instead of N.
+            other_user = next(
+                (
+                    member
+                    for member in direct_chat.members.all()
+                    if member.pk != obj.sender_id
+                ),
+                None,
+            )
             if other_user is not None:
                 full_name = f"{other_user.first_name} {other_user.last_name}".strip()
                 name = full_name or other_user.phone_number

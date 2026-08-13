@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 import { Check } from "lucide-react";
 import { Link } from "react-router-dom";
+
+import { AnimatedContent } from "@/components/motion/AnimatedContent";
+import { AnimatedListItem } from "@/components/motion/AnimatedList";
+import { BlurText } from "@/components/motion/BlurText";
 import { BrandMark } from "../BrandMark";
 
 interface AuthShellProps {
@@ -27,7 +31,9 @@ export function AuthShell({
         </header>
 
         <div className="flex min-h-0 flex-1 items-center justify-center py-6">
-          <div className="w-full max-w-md">{children}</div>
+          <AnimatedContent direction="up" distance={20} className="w-full max-w-md">
+            {children}
+          </AnimatedContent>
         </div>
       </section>
 
@@ -50,22 +56,30 @@ export function AuthShell({
               Real-time messaging
             </span>
 
-            <h2 className="mt-6 text-4xl font-semibold leading-tight tracking-tight text-foreground">
-              {visualTitle}
-            </h2>
-            <p className="mt-4 text-base leading-7 text-muted-foreground">{visualText}</p>
+            <BlurText
+              as="h2"
+              text={visualTitle}
+              delay={0.15}
+              className="mt-6 block text-4xl font-semibold leading-tight tracking-tight text-foreground"
+            />
+            <AnimatedContent direction="up" delay={0.35}>
+              <p className="mt-4 text-base leading-7 text-muted-foreground">
+                {visualText}
+              </p>
+            </AnimatedContent>
 
             <ul className="mt-9 space-y-3">
-              {visualBullets.map((item) => (
-                <li
+              {visualBullets.map((item, index) => (
+                <AnimatedListItem
                   key={item}
+                  index={index}
                   className="flex items-center gap-3 rounded-2xl border border-border bg-white/[0.03] px-4 py-3 text-sm text-foreground/85 backdrop-blur-sm"
                 >
                   <span className="bg-brand-gradient grid size-6 shrink-0 place-items-center rounded-lg">
                     <Check className="size-3.5 text-white" />
                   </span>
                   {item}
-                </li>
+                </AnimatedListItem>
               ))}
             </ul>
           </div>

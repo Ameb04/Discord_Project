@@ -172,6 +172,13 @@ function atClock(day: Date, hours: number, minutes = 0) {
   return atMinutes(day, hours * 60 + minutes);
 }
 
+/** Drop sub-minute precision — the picker only ever shows whole minutes. */
+function atWholeMinute(timestamp: number) {
+  const result = new Date(timestamp);
+  result.setSeconds(0, 0);
+  return result;
+}
+
 /**
  * The handful of times people actually pick, so the common case never needs the
  * calendar. Anything already in the past is dropped rather than shown disabled.
@@ -187,12 +194,12 @@ export function buildSchedulePresets(now = new Date()): SchedulePreset[] {
     {
       id: "in-30-minutes",
       label: "In 30 minutes",
-      at: new Date(now.getTime() + 30 * MINUTE_MS),
+      at: atWholeMinute(now.getTime() + 30 * MINUTE_MS),
     },
     {
       id: "in-1-hour",
       label: "In 1 hour",
-      at: new Date(now.getTime() + HOUR_MS),
+      at: atWholeMinute(now.getTime() + HOUR_MS),
     },
     { id: "tonight", label: `Tonight, ${formatTime(tonight)}`, at: tonight },
     {

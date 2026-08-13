@@ -11,12 +11,14 @@ def chat_group_name(chat_id):
 
 
 def broadcast_message_after_commit(message):
-    """Broadcast a canonical normal-message payload only after commit."""
+    """Broadcast a canonical normal-message payload only after commit.
+
+    The id is captured now and the row re-read at broadcast time, so listeners
+    always receive the committed state rather than whatever the in-memory
+    instance happened to hold.
+    """
     message_id = message.pk
-    transaction.on_commit(
-        lambda: _broadcast_message(message_id),
-        robust=True,
-    )
+    transaction.on_commit(lambda: _broadcast_message(message_id), robust=True)
 
 
 def _broadcast_message(message_id):

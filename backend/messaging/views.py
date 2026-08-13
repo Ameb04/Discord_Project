@@ -89,13 +89,10 @@ class MessageListCreateView(APIView):
         if not can_access_chat(request.user, chat):
             raise PermissionDenied("You do not have permission to access this chat.")
 
-        messages = (
-            NormalMessage.objects.filter(chat=chat, is_deleted=False)
-            .select_related("sender", "sender__tag")
-            .order_by("sent_at", "pk")
-        )
         serializer = NormalMessageSerializer(
-            messages, many=True, context={"request": request}
+            _accessible_messages_queryset(chat),
+            many=True,
+            context={"request": request},
         )
         return Response(serializer.data)
 
@@ -210,12 +207,14 @@ class ScheduledMessageListView(APIView):
 
     def get(self, request):
         messages = (
-            ScheduledMessage.objects.filter(sender=request.user).exclude(
-                status=ScheduledMessageStatus.CANCELLED
-            )
+            ScheduledMessage.objects.filter(sender=request.user)
+            .exclude(status=ScheduledMessageStatus.CANCELLED)
             .select_related(
                 "chat", "chat__pv", "chat__group", "chat__topic__channel"
             )
+            # The direct-chat destination name comes from the *other* member, so
+            # prefetch members rather than querying once per listed message.
+            .prefetch_related("chat__pv__members")
             .order_by("scheduled_at", "pk")
         )
         serializer = ScheduledMessageListSerializer(
@@ -336,30 +335,20 @@ class MessageUpdateView(APIView):
         if not can_access_chat(request.user, chat):
             raise PermissionDenied("You do not have permission to access this chat.")
 
-        # Data from form-data can have 'true'/'false' for booleans, DRF handles it
-        # but if using JSON, it handles native booleans.
         request_serializer = MessageUpdateSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
-
         validated_data = request_serializer.validated_data
-
-        # We need to distinguish between missing and None for content
-        content = validated_data.get("content")
-        if "content" not in request.data:
-            content = None
-
-        remove_file = validated_data.get("remove_file", False)
-        if str(request.data.get("remove_file", "")).lower() == "true":
-            remove_file = True
 
         try:
             message = edit_message(
                 request.user,
                 chat,
                 message_id,
-                content=content,
+                # Omitted content means "leave the text alone"; an empty string
+                # means "clear it", so the two must not collapse into one value.
+                content=validated_data.get("content"),
                 uploaded_file=validated_data.get("file"),
-                remove_file=remove_file,
+                remove_file=validated_data["remove_file"],
             )
         except DjangoValidationError as exc:
             raise ValidationError(_validation_error_detail(exc)) from exc

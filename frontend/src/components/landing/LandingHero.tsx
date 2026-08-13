@@ -1,5 +1,9 @@
 import { ArrowRight, Paperclip, Send, Sparkles, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
+
+import { AnimatedContent } from "@/components/motion/AnimatedContent";
+import { BlurText } from "@/components/motion/BlurText";
+import { Magnet } from "@/components/motion/Magnet";
 import { Button } from "@/components/ui/button";
 import { BrandMark } from "../BrandMark";
 
@@ -70,47 +74,68 @@ export function LandingHero() {
 
         <main className="grid flex-1 items-center gap-14 py-12 lg:grid-cols-2 lg:py-0">
           <section className="max-w-2xl">
-            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-white/[0.04] px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur-sm">
-              <Sparkles className="size-3.5 text-primary" />
-              Real-time chat, beautifully simple
-            </span>
+            <AnimatedContent direction="up" distance={12}>
+              <span className="inline-flex items-center gap-2 rounded-full border border-border bg-white/[0.04] px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur-sm">
+                <Sparkles className="size-3.5 text-primary" />
+                Real-time chat, beautifully simple
+              </span>
+            </AnimatedContent>
 
             <h1 className="mt-6 text-4xl font-semibold leading-[1.05] tracking-tight text-foreground sm:text-6xl">
-              Where your{" "}
-              <span className="text-brand-gradient">conversations</span> come
-              together.
+              <BlurText text="Where your" delay={0.1} />{" "}
+              <BlurText
+                text="conversations"
+                delay={0.26}
+                className="text-brand-gradient"
+              />{" "}
+              <BlurText text="come together." delay={0.42} />
             </h1>
 
-            <p className="mt-6 max-w-xl text-base leading-8 text-muted-foreground">
-              Direct messaging, media sharing, and a calm, focused interface -
-              wrapped in a modern dark experience built for speed.
-            </p>
+            <AnimatedContent direction="up" delay={0.6}>
+              <p className="mt-6 max-w-xl text-base leading-8 text-muted-foreground">
+                Direct messaging, media sharing, and a calm, focused interface -
+                wrapped in a modern dark experience built for speed.
+              </p>
+            </AnimatedContent>
 
-            <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-              <Button asChild size="lg" className="shadow-glow">
-                <Link to="/signup">
-                  Get started free
-                  <ArrowRight className="size-4" />
-                </Link>
-              </Button>
-              <Button asChild size="lg" variant="outline">
-                <Link to="/login">I already have an account</Link>
-              </Button>
-            </div>
+            <AnimatedContent direction="up" delay={0.72}>
+              <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+                {/* The single most important action on the page — the one place
+                    the magnet effect earns its keep. */}
+                <Magnet className="w-full sm:w-auto">
+                  <Button asChild size="lg" className="w-full shadow-glow sm:w-auto">
+                    <Link to="/signup">
+                      Get started free
+                      <ArrowRight className="size-4" />
+                    </Link>
+                  </Button>
+                </Magnet>
+                <Button asChild size="lg" variant="outline">
+                  <Link to="/login">I already have an account</Link>
+                </Button>
+              </div>
 
-            <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-muted-foreground">
-              <span className="inline-flex items-center gap-2">
-                <Zap className="size-4 text-primary" /> Instant delivery
-              </span>
-              <span className="inline-flex items-center gap-2">
-                <Paperclip className="size-4 text-primary" /> File & media sharing
-              </span>
-            </div>
+              <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-muted-foreground">
+                <span className="inline-flex items-center gap-2">
+                  <Zap className="size-4 text-primary" /> Instant delivery
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <Paperclip className="size-4 text-primary" /> File & media
+                  sharing
+                </span>
+              </div>
+            </AnimatedContent>
           </section>
 
-          <section className="flex justify-center lg:justify-end">
+          <AnimatedContent
+            direction="left"
+            distance={28}
+            delay={0.35}
+            scale
+            className="flex justify-center lg:justify-end"
+          >
             <ChatPreview />
-          </section>
+          </AnimatedContent>
         </main>
       </div>
     </div>
