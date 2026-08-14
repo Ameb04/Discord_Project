@@ -6,7 +6,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from chats.models import Chat
+from chats.models import Channel, Chat
 from chats.permissions import can_access_chat
 from core.api import domain_errors
 
@@ -16,6 +16,8 @@ from .models import (
     ScheduledMessage,
     ScheduledMessageStatus,
 )
+from .mutes import set_channel_mute, set_chat_mute
+from .unread import unread_summary
 from .serializers import (
     MarkReadSerializer,
     MediaMessageCreateSerializer,
@@ -118,7 +120,26 @@ class MessageListCreateView(APIView):
 
 
 class MessageHistoryView(APIView):
-    """GET /api/chats/<chat_id>/messages/history/."""
+    """GET /api/chats/<chat_id>/messages/history/.
+
+    Three ways to pick the window, in the order they are checked:
+
+    * ``before=<id>`` — the page above that message, for scrolling back.
+    * ``after=<id>`` — the page below it, for scrolling forward out of a window
+      that started somewhere other than the end.
+    * ``anchor=unread`` — start where the reader left off rather than at the
+      end, so the first thing they have not seen is on screen.
+
+    Every response carries the unread state as of *this request*, read before
+    anything marks the chat as seen. That ordering is the whole contract: the
+    client draws its "unread from here" line from this number, and if the read
+    watermark had already moved the line would have nowhere to go.
+    """
+
+    # A few messages of already-read context above the unread run, so the first
+    # new message lands with something to sit against rather than flush against
+    # the top edge.
+    UNREAD_CONTEXT_LEAD = 3
 
     def get(self, request, chat_id):
         chat = get_object_or_404(Chat, pk=chat_id)
@@ -134,6 +155,8 @@ class MessageHistoryView(APIView):
             max_value=100,
         )
 
+        unread = unread_summary(request.user, chat)
+
         if not all_ids:
             return Response(
                 {
@@ -143,36 +166,60 @@ class MessageHistoryView(APIView):
                     "has_newer": False,
                     "oldest_message_id": None,
                     "newest_message_id": None,
+                    **unread,
                 }
             )
 
-        before = request.query_params.get("before")
-        if before not in (None, ""):
-            try:
-                before_id = int(before)
-            except (TypeError, ValueError):
-                raise ValidationError({"before": "Must be a positive integer."})
-            if before_id not in all_ids:
-                raise NotFound("Message not found.")
-            end = all_ids.index(before_id)
-            start = max(0, end - limit)
-            selected_ids = all_ids[start:end]
-            has_older = start > 0
-            has_newer = end < len(all_ids)
-        else:
-            selected_ids = all_ids[-limit:]
-            has_older = len(all_ids) > len(selected_ids)
-            has_newer = False
+        start, end = self._select_window(request, all_ids, limit, unread)
+        selected_ids = all_ids[start:end]
 
         payload = _serialise_window(chat, selected_ids, request)
         payload.update(
             {
                 "count": len(all_ids),
-                "has_older": has_older,
-                "has_newer": has_newer,
+                "has_older": start > 0,
+                "has_newer": end < len(all_ids),
+                **unread,
             }
         )
         return Response(payload)
+
+    def _select_window(self, request, all_ids, limit, unread):
+        """Return the ``[start, end)`` slice of ``all_ids`` to serialise."""
+        before = self._cursor(request, "before", all_ids)
+        if before is not None:
+            end = all_ids.index(before)
+            return max(0, end - limit), end
+
+        after = self._cursor(request, "after", all_ids)
+        if after is not None:
+            start = all_ids.index(after) + 1
+            return start, min(len(all_ids), start + limit)
+
+        first_unread_id = unread["first_unread_message_id"]
+        if request.query_params.get("anchor") == "unread" and first_unread_id in all_ids:
+            lead = all_ids.index(first_unread_id) - self.UNREAD_CONTEXT_LEAD
+            start = max(0, lead)
+            end = min(len(all_ids), start + limit)
+            # Pull back when the run is short enough that the window would
+            # otherwise hang off the end with blank space behind it.
+            return max(0, end - limit), end
+
+        # Nothing asked for in particular: the newest page, because a chat is a
+        # place you return to rather than a document you read from the top.
+        return max(0, len(all_ids) - limit), len(all_ids)
+
+    def _cursor(self, request, name, all_ids):
+        raw = request.query_params.get(name)
+        if raw in (None, ""):
+            return None
+        try:
+            message_id = int(raw)
+        except (TypeError, ValueError):
+            raise ValidationError({name: "Must be a positive integer."})
+        if message_id not in all_ids:
+            raise NotFound("Message not found.")
+        return message_id
 
 
 class ScheduledMessageCreateView(APIView):
@@ -381,6 +428,51 @@ class ChatReadStateView(APIView):
             )
 
         return Response({"last_read_message_id": last_read_message_id})
+
+
+class ChatMuteView(APIView):
+    """PUT/DELETE /api/chats/<chat_id>/mute/ - silence one conversation.
+
+    PUT mutes and DELETE unmutes, so the verb carries the intent and repeating
+    either one is harmless — which matters for a toggle that a double click can
+    easily fire twice.
+    """
+
+    def put(self, request, chat_id):
+        chat = get_object_or_404(Chat, pk=chat_id)
+
+        with domain_errors():
+            set_chat_mute(request.user, chat, True)
+
+        return Response({"is_muted": True})
+
+    def delete(self, request, chat_id):
+        chat = get_object_or_404(Chat, pk=chat_id)
+
+        with domain_errors():
+            set_chat_mute(request.user, chat, False)
+
+        return Response({"is_muted": False})
+
+
+class ChannelMuteView(APIView):
+    """PUT/DELETE /api/channels/<channel_id>/mute/ - silence every topic."""
+
+    def put(self, request, channel_id):
+        channel = get_object_or_404(Channel, pk=channel_id, is_deleted=False)
+
+        with domain_errors():
+            set_channel_mute(request.user, channel, True)
+
+        return Response({"is_muted": True})
+
+    def delete(self, request, channel_id):
+        channel = get_object_or_404(Channel, pk=channel_id, is_deleted=False)
+
+        with domain_errors():
+            set_channel_mute(request.user, channel, False)
+
+        return Response({"is_muted": False})
 
 
 class AttachmentDownloadView(APIView):

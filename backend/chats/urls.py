@@ -1,6 +1,7 @@
 from django.urls import include, path
 
 from messaging.urls import chat_message_patterns
+from messaging.views import ChannelMuteView, ChatMuteView
 
 from .views import (
     ChannelDetailView,
@@ -28,6 +29,9 @@ app_name = "chats"
 urlpatterns = [
     path("", ConversationListView.as_view(), name="conversation-list"),
     path("direct/", DirectChatCreateView.as_view(), name="direct-chat"),
+    # Muting is a property of the conversation, not of its messages, so it sits
+    # beside the message routes rather than inside them.
+    path("<int:chat_id>/mute/", ChatMuteView.as_view(), name="chat-mute"),
     path(
         "<int:chat_id>/messages/",
         include((chat_message_patterns, "messaging")),
@@ -72,6 +76,12 @@ channel_patterns = [
         "<int:channel_id>/join/",
         ChannelJoinView.as_view(),
         name="channel-join",
+    ),
+    # Silences every topic inside, including ones added later.
+    path(
+        "<int:channel_id>/mute/",
+        ChannelMuteView.as_view(),
+        name="channel-mute",
     ),
     path(
         "<int:channel_id>/invite/reset/",

@@ -107,6 +107,71 @@ class ScheduledMessage(Message):
         ]
 
 
+class ChatMute(models.Model):
+    """One person's decision to stop being notified about one chat.
+
+    Stored as a row that exists or does not, rather than a boolean per
+    membership: muting is the rare case, so the absent row is the default and
+    the table only ever holds the exceptions.
+
+    Muting silences *notifications*, never access — a muted chat is still read,
+    still written to, and still receives live updates while it is open. This is
+    deliberately separate from ``ChatReadState``: how far you have read and
+    whether you want to be told are different questions.
+    """
+
+    chat = models.ForeignKey(
+        "chats.Chat", on_delete=models.CASCADE, related_name="mutes"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="chat_mutes",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "chat_mutes"
+        constraints = [
+            models.UniqueConstraint(fields=["chat", "user"], name="uq_chat_mute")
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} muted chat {self.chat_id}"
+
+
+class ChannelMute(models.Model):
+    """One person's decision to silence a whole channel.
+
+    A channel is not a chat — its topics are — so muting one cannot be a
+    ``ChatMute``. Keeping it as its own row means a channel-wide mute survives
+    topics being added later, which is the whole point of muting the channel
+    rather than each topic in it. The two mutes stack: either one silences a
+    topic, and unmuting the channel leaves an individually muted topic quiet.
+    """
+
+    channel = models.ForeignKey(
+        "chats.Channel", on_delete=models.CASCADE, related_name="mutes"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="channel_mutes",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "channel_mutes"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["channel", "user"], name="uq_channel_mute"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} muted channel {self.channel_id}"
+
+
 class ChatReadState(models.Model):
     """How far one user has read in one chat.
 

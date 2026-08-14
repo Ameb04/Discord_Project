@@ -37,18 +37,100 @@ def group_bio_field(**kwargs):
     )
 
 
+class MuteStateMixin:
+    """Supplies ``is_muted`` — has *this* viewer silenced this conversation.
+
+    A list view puts the viewer's whole mute set in the serializer context, so
+    rendering N rows stays one query instead of N. Anything that forgets to —
+    a detail view serialising a single object — still answers correctly, just
+    with a query of its own.
+
+    Declaring the field is left to each serializer: DRF only collects declared
+    fields from bases that are serializers themselves, and a mixin that has to
+    be one to work is a mixin that stops mixing.
+    """
+
+    def _muted_viewer(self):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is None or not getattr(user, "is_authenticated", False):
+            return None
+        return user
+
+    def _is_chat_muted(self, chat_id):
+        from messaging.models import ChatMute
+
+        prefetched = self.context.get("muted_chat_ids")
+        if prefetched is not None:
+            return chat_id in prefetched
+
+        viewer = self._muted_viewer()
+        if viewer is None:
+            return False
+        return ChatMute.objects.filter(chat_id=chat_id, user=viewer).exists()
+
+    def _is_channel_muted(self, channel_id):
+        from messaging.models import ChannelMute
+
+        prefetched = self.context.get("muted_channel_ids")
+        if prefetched is not None:
+            return channel_id in prefetched
+
+        viewer = self._muted_viewer()
+        if viewer is None:
+            return False
+        return ChannelMute.objects.filter(
+            channel_id=channel_id, user=viewer
+        ).exists()
+
+
+class UnreadStateMixin(MuteStateMixin):
+    """Supplies ``unread_count`` and ``first_unread_message_id`` for a chat.
+
+    Same prefetch-or-ask arrangement as the mute flags, and for the same
+    reason: the sidebar renders every conversation the viewer has, so this must
+    cost one query for the whole list rather than one per row.
+    """
+
+    def _unread_for(self, chat_id):
+        from messaging.unread import unread_summaries
+
+        prefetched = self.context.get("unread_by_chat")
+        if prefetched is None:
+            viewer = self._muted_viewer()
+            prefetched = (
+                unread_summaries(viewer, [chat_id]) if viewer is not None else {}
+            )
+
+        return prefetched.get(
+            chat_id, {"unread_count": 0, "first_unread_message_id": None}
+        )
+
+
 class DirectChatRequestSerializer(serializers.Serializer):
     target_user = serializers.CharField()
 
 
-class DirectChatSerializer(serializers.Serializer):
+class DirectChatSerializer(UnreadStateMixin, serializers.Serializer):
     id = serializers.IntegerField(source="pk")
     type = serializers.SerializerMethodField()
     created = serializers.SerializerMethodField()
     other_user = serializers.SerializerMethodField()
+    is_muted = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
+    first_unread_message_id = serializers.SerializerMethodField()
 
     def get_type(self, obj):
         return "direct"
+
+    def get_is_muted(self, obj):
+        return self._is_chat_muted(obj.pk)
+
+    def get_unread_count(self, obj):
+        return self._unread_for(obj.pk)["unread_count"]
+
+    def get_first_unread_message_id(self, obj):
+        return self._unread_for(obj.pk)["first_unread_message_id"]
 
     def get_created(self, obj):
         return bool(self.context["created"])
@@ -60,7 +142,7 @@ class DirectChatSerializer(serializers.Serializer):
         ).data
 
 
-class GroupSummarySerializer(serializers.ModelSerializer):
+class GroupSummarySerializer(UnreadStateMixin, serializers.ModelSerializer):
     """A group as it appears in the conversation sidebar."""
 
     type = serializers.SerializerMethodField()
@@ -68,6 +150,9 @@ class GroupSummarySerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
     member_count = serializers.SerializerMethodField()
     is_owner = serializers.SerializerMethodField()
+    is_muted = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
+    first_unread_message_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Group
@@ -80,12 +165,24 @@ class GroupSummarySerializer(serializers.ModelSerializer):
             "avatar_url",
             "member_count",
             "is_owner",
+            "is_muted",
+            "unread_count",
+            "first_unread_message_id",
             "access_level",
             "allow_media",
         )
 
     def get_type(self, obj):
         return "group"
+
+    def get_is_muted(self, obj):
+        return self._is_chat_muted(obj.pk)
+
+    def get_unread_count(self, obj):
+        return self._unread_for(obj.pk)["unread_count"]
+
+    def get_first_unread_message_id(self, obj):
+        return self._unread_for(obj.pk)["first_unread_message_id"]
 
     def get_avatar_url(self, obj):
         return obj.avatar.url if obj.avatar else None
@@ -185,13 +282,16 @@ class GroupMemberAddSerializer(serializers.Serializer):
 # --------------------------------------------------------------------------
 
 
-class TopicSummarySerializer(serializers.ModelSerializer):
+class TopicSummarySerializer(UnreadStateMixin, serializers.ModelSerializer):
     """One topic as the channel's topic list and the sidebar know it."""
 
     type = serializers.SerializerMethodField()
     tag = TagSerializer(read_only=True)
     avatar_url = serializers.SerializerMethodField()
     channel = serializers.PrimaryKeyRelatedField(read_only=True)
+    is_muted = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
+    first_unread_message_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Topic
@@ -203,9 +303,18 @@ class TopicSummarySerializer(serializers.ModelSerializer):
             "tag",
             "avatar_url",
             "channel",
+            "is_muted",
+            "unread_count",
+            "first_unread_message_id",
             "access_level",
             "allow_member_messages",
         )
+
+    def get_unread_count(self, obj):
+        return self._unread_for(obj.pk)["unread_count"]
+
+    def get_first_unread_message_id(self, obj):
+        return self._unread_for(obj.pk)["first_unread_message_id"]
 
     def get_type(self, obj):
         return "topic"
@@ -213,8 +322,15 @@ class TopicSummarySerializer(serializers.ModelSerializer):
     def get_avatar_url(self, obj):
         return obj.avatar.url if obj.avatar else None
 
+    def get_is_muted(self, obj):
+        # This topic's own mute only. A channel-wide mute silences it too, but
+        # that is the channel's flag to report — every surface that renders a
+        # topic has the channel beside it, and collapsing the two here would
+        # make "unmute this topic" look broken when the channel is the quiet one.
+        return self._is_chat_muted(obj.pk)
 
-class ChannelSummarySerializer(serializers.ModelSerializer):
+
+class ChannelSummarySerializer(UnreadStateMixin, serializers.ModelSerializer):
     """A channel as it appears in the sidebar and the public directory.
 
     Carries the caller's own standing — member, admin, owner — because every
@@ -230,6 +346,8 @@ class ChannelSummarySerializer(serializers.ModelSerializer):
     is_owner = serializers.SerializerMethodField()
     is_admin = serializers.SerializerMethodField()
     is_member = serializers.SerializerMethodField()
+    is_muted = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Channel
@@ -245,12 +363,33 @@ class ChannelSummarySerializer(serializers.ModelSerializer):
             "is_owner",
             "is_admin",
             "is_member",
+            "is_muted",
+            "unread_count",
             "access_level",
             "allow_media",
         )
 
     def get_type(self, obj):
         return "channel"
+
+    def get_is_muted(self, obj):
+        return self._is_channel_muted(obj.pk)
+
+    def get_unread_count(self, obj):
+        """Everything unread across the topics inside.
+
+        A channel holds no messages of its own, so its badge is the sum of the
+        rooms it contains — which is the number that matters while the channel
+        sits collapsed in the sidebar and its topics are out of sight.
+        """
+        if not self.get_is_member(obj):
+            return 0
+
+        return sum(
+            self._unread_for(topic.pk)["unread_count"]
+            for topic in obj.topics.all()
+            if not topic.is_deleted
+        )
 
     def get_avatar_url(self, obj):
         return obj.avatar.url if obj.avatar else None

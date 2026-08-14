@@ -8,6 +8,8 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from core.api import domain_errors
+from messaging.mutes import muted_channel_ids, muted_chat_ids
+from messaging.unread import unread_summaries
 
 from .models import AccessLevel, Channel, ChannelMembership, Group, Pv, Topic
 from .permissions import (
@@ -62,6 +64,28 @@ from .services import (
 # How many channels the public directory will return for one query. Enough to
 # browse, small enough that "list everything" is never a useful attack.
 CHANNEL_DIRECTORY_LIMIT = 50
+
+
+def _conversation_context(request, chat_ids=None):
+    """Serializer context with the viewer's mutes and unread counts prefetched.
+
+    Both are per-viewer facts that every row needs, so each is read once for
+    the whole response. Without this the one endpoint that returns every
+    conversation would ask "have I muted this, and how much have I not read?"
+    separately for each of them.
+
+    ``chat_ids`` scopes the unread query to the chats about to be rendered;
+    omitting it leaves the unread map out, and serializers fall back to asking
+    per object — which is what a single-object detail view wants anyway.
+    """
+    context = {
+        "request": request,
+        "muted_chat_ids": muted_chat_ids(request.user),
+        "muted_channel_ids": muted_channel_ids(request.user),
+    }
+    if chat_ids is not None:
+        context["unread_by_chat"] = unread_summaries(request.user, chat_ids)
+    return context
 
 
 def _group_queryset():
@@ -157,9 +181,7 @@ class ConversationListView(APIView):
     """GET /api/chats/ - return sidebar conversations for the current user."""
 
     def get(self, request):
-        private_chats = []
-
-        pvs = (
+        pvs = list(
             Pv.objects.filter(members=request.user, is_deleted=False)
             .prefetch_related(
                 Prefetch(
@@ -170,6 +192,31 @@ class ConversationListView(APIView):
             .order_by("pk")
         )
 
+        groups = list(
+            _group_queryset()
+            .filter(Q(owner=request.user) | Q(members=request.user))
+            .distinct()
+            .order_by("name", "pk")
+        )
+
+        channels = list(_member_channels(request.user))
+
+        # Every chat on this page, gathered before anything is serialised, so
+        # unread state for the whole inbox is one query rather than one per row.
+        # Topics are chats; the channels holding them are not.
+        chat_ids = [
+            *(pv.pk for pv in pvs),
+            *(group.pk for group in groups),
+            *(
+                topic.pk
+                for channel in channels
+                for topic in channel.topics.all()
+                if not topic.is_deleted
+            ),
+        ]
+        context = _conversation_context(request, chat_ids)
+
+        private_chats = []
         for pv in pvs:
             other_user = next(
                 (member for member in pv.members.all() if member.pk != request.user.pk),
@@ -182,33 +229,26 @@ class ConversationListView(APIView):
                 DirectChatSerializer(
                     pv,
                     context={
-                        "request": request,
+                        **context,
                         "created": False,
                         "other_user": other_user,
                     },
                 ).data
             )
 
-        groups = (
-            _group_queryset()
-            .filter(Q(owner=request.user) | Q(members=request.user))
-            .distinct()
-            .order_by("name", "pk")
-        )
-
         return Response(
             {
                 "private_chats": private_chats,
                 "groups": GroupSummarySerializer(
-                    groups, many=True, context={"request": request}
+                    groups, many=True, context=context
                 ).data,
                 # Channels arrive with their topics inline: the sidebar renders
                 # each channel as an expandable row, and one round trip for the
                 # whole tree beats one per channel the moment it is opened.
                 "channels": ChannelDetailSerializer(
-                    _member_channels(request.user),
+                    channels,
                     many=True,
-                    context={"request": request},
+                    context=context,
                 ).data,
             }
         )
@@ -254,7 +294,7 @@ class GroupListCreateView(APIView):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get(self, request):
-        groups = (
+        groups = list(
             _group_queryset()
             .filter(Q(owner=request.user) | Q(members=request.user))
             .distinct()
@@ -262,7 +302,11 @@ class GroupListCreateView(APIView):
         )
         return Response(
             GroupSummarySerializer(
-                groups, many=True, context={"request": request}
+                groups,
+                many=True,
+                context=_conversation_context(
+                    request, [group.pk for group in groups]
+                ),
             ).data
         )
 
@@ -418,11 +462,18 @@ class ChannelListCreateView(APIView):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get(self, request):
+        channels = list(_member_channels(request.user))
+        topic_ids = [
+            topic.pk
+            for channel in channels
+            for topic in channel.topics.all()
+            if not topic.is_deleted
+        ]
         return Response(
             ChannelDetailSerializer(
-                _member_channels(request.user),
+                channels,
                 many=True,
-                context={"request": request},
+                context=_conversation_context(request, topic_ids),
             ).data
         )
 
@@ -464,10 +515,21 @@ class ChannelDirectoryView(APIView):
                 Q(name__icontains=query) | Q(bio__icontains=query)
             )
 
-        channels = channels.order_by("name", "pk")[:CHANNEL_DIRECTORY_LIMIT]
+        channels = list(channels.order_by("name", "pk")[:CHANNEL_DIRECTORY_LIMIT])
+        # Includes topics of channels the viewer has not joined; those channels
+        # report zero regardless, and passing the lot keeps this to one query
+        # instead of falling back to one per topic for the ones they are in.
+        topic_ids = [
+            topic.pk
+            for channel in channels
+            for topic in channel.topics.all()
+            if not topic.is_deleted
+        ]
         return Response(
             ChannelSummarySerializer(
-                channels, many=True, context={"request": request}
+                channels,
+                many=True,
+                context=_conversation_context(request, topic_ids),
             ).data
         )
 

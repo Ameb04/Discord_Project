@@ -7,6 +7,7 @@ from accounts.models import User
 from chats.models import Chat
 from chats.permissions import can_access_chat
 
+from .notifications import user_notification_group_name
 from .realtime import chat_group_name
 
 
@@ -18,6 +19,11 @@ def _user_can_access_chat(user_id, chat_id):
     except (User.DoesNotExist, Chat.DoesNotExist):
         return False
     return can_access_chat(user, chat)
+
+
+@database_sync_to_async
+def _user_is_still_active(user_id):
+    return User.objects.filter(pk=user_id, is_active=True).exists()
 
 
 class ChatMessageConsumer(AsyncWebsocketConsumer):
@@ -93,3 +99,58 @@ class ChatMessageConsumer(AsyncWebsocketConsumer):
             return
 
         await self.send(text_data=json.dumps(payload))
+
+
+class UserNotificationConsumer(AsyncWebsocketConsumer):
+    """Carry one person's notifications, for every conversation at once.
+
+    Deliberately not per chat: the point of a notification is to reach someone
+    who does *not* have that conversation open, so it cannot ride the socket
+    they only hold while they do. One socket per signed-in tab covers every
+    room they belong to, including ones they join after connecting.
+
+    Muting is applied at fan-out rather than here, so a mute takes effect
+    without the reader's socket knowing anything about it.
+    """
+
+    async def connect(self):
+        user = self.scope.get("user")
+        if not user or not user.is_authenticated or not user.is_active:
+            await self.close(code=4401)
+            return
+
+        self.user_id = user.pk
+        self.group_name = user_notification_group_name(self.user_id)
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        group_name = getattr(self, "group_name", None)
+        if group_name:
+            await self.channel_layer.group_discard(group_name, self.channel_name)
+
+    async def receive(self, text_data=None, bytes_data=None):
+        # Notifications are server-generated; client payloads are ignored.
+        return
+
+    async def notify_message(self, event):
+        # A deactivated account keeps its socket until it next hears something,
+        # so the check is here rather than only at connect time. Membership is
+        # already settled by the fan-out, which recomputes it per message.
+        if not await _user_is_still_active(self.user_id):
+            await self.channel_layer.group_discard(
+                self.group_name,
+                self.channel_name,
+            )
+            self.group_name = None
+            await self.close(code=4401)
+            return
+
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "notification.message",
+                    **event["notification"],
+                }
+            )
+        )
