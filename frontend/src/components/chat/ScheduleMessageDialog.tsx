@@ -80,7 +80,7 @@ function ScheduleMessageDialog({
       title="Schedule message"
       description={`Delivered to ${conversationLabel} even while you are offline.`}
       icon={<CalendarClock className="size-4.5" aria-hidden="true" />}
-      className="sm:max-w-xl"
+      className="sm:max-w-2xl"
       footer={
         <div className="flex flex-col gap-3">
           <div

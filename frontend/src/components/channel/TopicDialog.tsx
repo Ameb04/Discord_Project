@@ -102,6 +102,7 @@ function TopicDialog({
           : "Topics are where the conversation actually happens."
       }
       icon={<Hash className="size-4.5" aria-hidden="true" />}
+      className="sm:max-w-2xl"
       footer={
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button

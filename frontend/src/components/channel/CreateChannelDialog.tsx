@@ -79,6 +79,7 @@ function CreateChannelDialog({ open, onClose, onCreated }: CreateChannelDialogPr
       title="New channel"
       description="A channel holds topics. You will own it and can add topics once it exists."
       icon={<Radio className="size-4.5" aria-hidden="true" />}
+      className="sm:max-w-2xl"
       footer={
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button

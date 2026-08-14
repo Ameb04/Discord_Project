@@ -107,7 +107,12 @@ function RoomProfileFields({
   }
 
   return (
-    <div className="grid gap-4">
+    // Two columns from `sm` up. Every field here is short, so a single stack
+    // made the dialogs around it taller than a laptop viewport and pushed the
+    // Save button behind a scroll — pairing them is what keeps the whole form
+    // on screen. Only the bio and whatever the caller adds stay full width,
+    // where a long line has somewhere to go.
+    <div className="grid gap-4 sm:grid-cols-2">
       <div className="flex items-center gap-4">
         <Avatar className="size-16 shrink-0 border border-border">
           {shownAvatar ? (
@@ -183,14 +188,7 @@ function RoomProfileFields({
         />
       </div>
 
-      <BioField
-        value={value.bio}
-        disabled={disabled}
-        placeholder={bioPlaceholder}
-        onChange={(bio) => update({ bio })}
-      />
-
-      <div className="grid gap-2">
+      <div className="grid content-start gap-2">
         <Label>Tag</Label>
         <Select
           value={value.tagId}
@@ -211,8 +209,20 @@ function RoomProfileFields({
         </Select>
       </div>
 
+      {/* Beside the tag rather than under it: the two together are exactly one
+          row tall, and the bio is the field that benefits from the extra
+          height anyway. */}
+      <BioField
+        value={value.bio}
+        disabled={disabled}
+        placeholder={bioPlaceholder}
+        onChange={(bio) => update({ bio })}
+      />
+
       {showAccessLevel ? (
-        <div className="grid gap-2">
+        // Full width: the options spell out what each one means, and half a
+        // row is not enough to read that in.
+        <div className="grid content-start gap-2 sm:col-span-2">
           <Label htmlFor={accessId}>Visibility</Label>
           <Select
             value={value.accessLevel}
@@ -238,7 +248,7 @@ function RoomProfileFields({
         </div>
       ) : null}
 
-      {children}
+      {children ? <div className="sm:col-span-2">{children}</div> : null}
     </div>
   );
 }

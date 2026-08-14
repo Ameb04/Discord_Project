@@ -78,6 +78,7 @@ function CreateGroupDialog({ open, onClose, onCreated }: CreateGroupDialogProps)
       title="New group"
       description="You will own this group and can invite people once it exists."
       icon={<UsersRound className="size-4.5" aria-hidden="true" />}
+      className="sm:max-w-2xl"
       footer={
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button

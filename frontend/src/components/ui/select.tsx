@@ -24,7 +24,11 @@ function SelectTrigger({
       data-slot="select-trigger"
       className={cn(
         "flex h-11 w-full items-center justify-between gap-2 rounded-xl border border-input bg-white/[0.04] px-4 py-2 text-sm text-foreground shadow-sm outline-none transition-[color,box-shadow]",
-        "data-[placeholder]:text-muted-foreground/70 [&>span]:line-clamp-1",
+        // The value span mirrors the chosen item's own children, icon and all
+        // — and preflight makes an `svg` a block, which would drop the label
+        // onto a second line. Laying the span out as a row puts it back beside
+        // its icon, the way the option reads in the list.
+        "data-[placeholder]:text-muted-foreground/70 [&>span]:flex [&>span]:items-center [&>span]:gap-2 [&>span]:truncate",
         "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40",
         "disabled:cursor-not-allowed disabled:opacity-60",
         className
