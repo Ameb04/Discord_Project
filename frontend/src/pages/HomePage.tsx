@@ -225,7 +225,7 @@ function HomePage() {
   // the pane. Narrowing it starts clipping the tab labels, which is what that
   // width is set from.
   return (
-    <div className="mx-auto grid h-full min-h-0 w-full max-w-[84rem] grid-rows-[minmax(0,1fr)] gap-4 px-3 py-3 sm:px-6 sm:py-4 lg:grid-cols-[24rem_minmax(0,1fr)] lg:px-8">
+    <div className="mx-auto grid h-full min-h-0 w-full max-w-[84rem] grid-rows-[minmax(0,1fr)] gap-4 px-3 py-3 sm:px-6 sm:py-4 lg:grid-cols-[26rem_minmax(0,1fr)] lg:px-8">
       <div className={cn("min-h-0", hasOpenPane && "hidden lg:block")}>
         <ConversationSidebar
           privateChats={conversations.private_chats}

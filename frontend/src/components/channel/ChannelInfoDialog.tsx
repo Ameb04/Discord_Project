@@ -464,13 +464,19 @@ function ChannelInfoDialog({
             </section>
           )}
 
+          {/* `min-w-0` twice below, once per grid level: a grid track sized
+              `auto` is at least as wide as its widest item's content, and an
+              invite URL has nowhere to break — so without it the link pushes
+              the dialog body wider than the panel and the whole thing scrolls
+              sideways. Zeroing the floor lets the link shrink and ellipsise
+              instead, which is what `truncate` was there for. */}
           {channel.invite_link ? (
-            <section className="grid gap-2">
+            <section className="grid min-w-0 gap-2">
               <p className="flex items-center gap-2 text-xs font-medium tracking-[0.14em] text-primary/80 uppercase">
                 <Link2 className="size-3.5" aria-hidden="true" />
                 Invite link
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2">
                 <code className="min-w-0 flex-1 truncate rounded-xl border border-border bg-white/[0.03] px-3 py-2 text-xs text-muted-foreground">
                   {channelInviteUrlFor(channel.invite_link)}
                 </code>

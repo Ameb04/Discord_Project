@@ -449,13 +449,16 @@ function GroupInfoDialog({
               </section>
             )}
 
+            {/* `min-w-0` at both grid levels below, for the reason spelled out
+                in `ChannelInfoDialog`: an unbreakable invite URL widens an
+                `auto` track past the panel and the dialog scrolls sideways. */}
             {group.invite_link ? (
-              <section className="grid gap-2">
+              <section className="grid min-w-0 gap-2">
                 <p className="flex items-center gap-2 text-xs font-medium tracking-[0.14em] text-primary/80 uppercase">
                   <Link2 className="size-3.5" aria-hidden="true" />
                   Invite link
                 </p>
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 items-center gap-2">
                   <code className="min-w-0 flex-1 truncate rounded-xl border border-border bg-white/[0.03] px-3 py-2 text-xs text-muted-foreground">
                     {inviteUrlFor(group.invite_link)}
                   </code>

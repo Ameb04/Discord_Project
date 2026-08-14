@@ -12,7 +12,7 @@ export const BIO_MAX_LENGTH = 70;
 export const BIO_WARN_REMAINING = 10;
 
 /**
- * A room's name — group, channel or topic — has to survive a 24rem sidebar
+ * A room's name — group, channel or topic — has to survive a 26rem sidebar
  * row, a chat header, and a dialog title without becoming an ellipsis in every
  * one of them.
  *
