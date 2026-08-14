@@ -55,7 +55,7 @@ function Navbar() {
 
   return (
     <header className="z-40 shrink-0 border-b border-border bg-background/70 backdrop-blur-xl">
-      <div className="mx-auto flex h-16 w-full max-w-[96rem] items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6 lg:px-8">
+      <div className="mx-auto flex h-16 w-full max-w-[84rem] items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6 lg:px-8">
         <Link
           to="/home"
           aria-label="Go to home"

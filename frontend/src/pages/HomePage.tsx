@@ -219,6 +219,11 @@ function HomePage() {
   // `grid-rows-[minmax(0,1fr)]` is explicit on purpose: the single row must fill
   // the container so both panes can scroll internally, and leaning on
   // `align-content: stretch` to do that implicitly is easy to break later.
+  //
+  // The sidebar track is fixed, so the width it takes comes out of the
+  // conversation — which has room to spare, its bubbles being capped well below
+  // the pane. Narrowing it starts clipping the tab labels, which is what that
+  // width is set from.
   return (
     <div className="mx-auto grid h-full min-h-0 w-full max-w-[84rem] grid-rows-[minmax(0,1fr)] gap-4 px-3 py-3 sm:px-6 sm:py-4 lg:grid-cols-[24rem_minmax(0,1fr)] lg:px-8">
       <div className={cn("min-h-0", hasOpenPane && "hidden lg:block")}>

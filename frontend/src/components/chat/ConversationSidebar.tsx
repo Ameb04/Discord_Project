@@ -399,11 +399,12 @@ function ConversationSidebar({
                   />
                 ) : null}
                 <Icon className="relative size-4 shrink-0" aria-hidden="true" />
-                {/* A size down from the tab's own text: three labels, three
-                    icons and three counts share one rail, and the longest
-                    label is what decides whether any of them can be read in
-                    full. The label steps aside entirely below `sm`, where the
-                    counts alone have to do the work. */}
+                {/* Three labels, three icons and three counts share one rail,
+                    so the longest label — "Channels" — is what the sidebar's
+                    track width has to be able to spell out; `truncate` is only
+                    the backstop for a count that runs to several digits. Below
+                    `sm` the label steps aside entirely and the counts do the
+                    work alone. */}
                 <span className="relative hidden truncate sm:inline">
                   {label}
                 </span>
