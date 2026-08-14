@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { getChannel } from "../api/channels";
 import { getConversationIndex } from "../api/chats";
+import { useNotifications } from "@/context/NotificationContext";
 import ChannelPage from "./ChannelPage";
 import ChatPage from "./ChatPage";
 import ConversationSidebar from "../components/chat/ConversationSidebar";
@@ -26,6 +27,9 @@ const EMPTY_INDEX: ConversationIndex = {
   channels: [],
 };
 
+/** How long a burst of incoming messages settles before the badges refresh. */
+const ACTIVITY_REFRESH_DEBOUNCE_MS = 400;
+
 /**
  * The signed-in home: a conversation list beside whatever is open.
  *
@@ -41,6 +45,7 @@ function HomePage() {
     channelId?: string;
   }>();
   const navigate = useNavigate();
+  const { activityEpoch } = useNotifications();
 
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [isCreatingChannel, setIsCreatingChannel] = useState(false);
@@ -108,6 +113,24 @@ function HomePage() {
   const refreshConversations = useCallback(() => {
     setReloadKey((key) => key + 1);
   }, []);
+
+  /**
+   * Keep the unread badges honest as messages arrive.
+   *
+   * `activityEpoch` rises on every event the notification socket delivers,
+   * muted rooms included, and the answer is always to re-ask the server rather
+   * than to keep a running tally here: the counts are derived from the read
+   * watermark, and a second copy maintained client-side would drift the first
+   * time a message was deleted or the chat was read in another tab.
+   *
+   * Debounced because a burst in a busy group is one refetch's worth of news,
+   * not twenty.
+   */
+  useEffect(() => {
+    if (activityEpoch === 0) return;
+    const timer = setTimeout(refreshConversations, ACTIVITY_REFRESH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [activityEpoch, refreshConversations]);
 
   // A channel the index does not carry — a public one reached from the
   // directory or an invite. Fetched on its own so a stranger can look at it
@@ -201,6 +224,14 @@ function HomePage() {
           ? `Chat #${parsedChatId}`
           : undefined;
 
+  // Whichever kind of room is open, its own mute switch. A topic inside a
+  // muted channel is handled separately, where the channel is also in hand.
+  const isSelectedChatMuted = Boolean(
+    selectedPrivateChat?.is_muted ??
+      selectedGroup?.is_muted ??
+      selectedTopic?.is_muted
+  );
+
   const selectedSubtitle = selectedPrivateChat
     ? selectedPrivateChat.other_user.tag
       ? `${selectedPrivateChat.other_user.phone_number} · ${selectedPrivateChat.other_user.tag.title}`
@@ -274,6 +305,9 @@ function HomePage() {
             directPeer={selectedPrivateChat?.other_user}
             topic={selectedTopic}
             topicChannel={selectedTopicChannel}
+            isMuted={isSelectedChatMuted}
+            onMuteChanged={refreshConversations}
+            onRead={refreshConversations}
             onGroupChanged={refreshConversations}
             onGroupDeleted={() => {
               refreshConversations();

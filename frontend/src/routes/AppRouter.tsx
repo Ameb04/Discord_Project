@@ -2,6 +2,7 @@ import { LoaderCircle } from "lucide-react";
 import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import Navbar from "../components/Navbar";
+import { NotificationToasts } from "../components/notification/NotificationToasts";
 import SearchResultsPage from "../pages/SearchResultsPage";
 import SettingsPage from "../pages/SettingsPage";
 import HomePage from "../pages/HomePage";
@@ -75,6 +76,9 @@ function AppLayout() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Outlet />
       </div>
+      {/* Fixed to the viewport, so it belongs to the shell rather than to the
+          scrolling content — a toast must not scroll away with the page. */}
+      <NotificationToasts />
     </div>
   );
 }
