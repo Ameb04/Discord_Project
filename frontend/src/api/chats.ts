@@ -12,7 +12,15 @@ import type {
 } from "../types/chat";
 
 type MessageHistoryParams = {
+  /** Page backwards: the messages above this one. */
   before?: number;
+  /** Page forwards: the messages below this one. */
+  after?: number;
+  /**
+   * Open where the reader left off instead of at the end. Falls back to the
+   * newest page when there is nothing unread.
+   */
+  anchor?: "unread";
   limit?: number;
 };
 
@@ -26,6 +34,35 @@ export async function startDirectChat(targetUserPhoneNumber: string): Promise<Di
     target_user: targetUserPhoneNumber,
   });
   return response.data;
+}
+
+/**
+ * Silence or unsilence one conversation for the signed-in person alone.
+ *
+ * PUT mutes and DELETE unmutes, so firing the same call twice is harmless —
+ * which a toggle button will do sooner or later.
+ */
+export async function setChatMuted(
+  chatId: number,
+  muted: boolean
+): Promise<boolean> {
+  const url = `/api/chats/${chatId}/mute/`;
+  const response = muted
+    ? await client.put<{ is_muted: boolean }>(url)
+    : await client.delete<{ is_muted: boolean }>(url);
+  return response.data.is_muted;
+}
+
+/** The same, for a whole channel — every topic in it, present and future. */
+export async function setChannelMuted(
+  channelId: number,
+  muted: boolean
+): Promise<boolean> {
+  const url = `/api/channels/${channelId}/mute/`;
+  const response = muted
+    ? await client.put<{ is_muted: boolean }>(url)
+    : await client.delete<{ is_muted: boolean }>(url);
+  return response.data.is_muted;
 }
 
 export async function editMessage(

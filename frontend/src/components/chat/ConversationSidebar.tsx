@@ -1,4 +1,5 @@
 import {
+  BellOff,
   ChevronRight,
   Compass,
   Hash,
@@ -21,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { initialsFor, personDisplayName } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { UnreadBadge } from "./UnreadBadge";
 import type {
   ChannelDetail,
   ConversationTab,
@@ -45,6 +47,22 @@ type ConversationSidebarProps = {
   onCreateGroup: () => void;
   onCreateChannel: () => void;
 };
+
+/**
+ * The struck-through bell marking a silenced row.
+ *
+ * Muted conversations keep their place in the list rather than being sorted
+ * away or dimmed to unreadability — a muted chat is still one you open, just
+ * not one that interrupts you. The icon is the whole signal.
+ */
+function MutedIndicator({ label }: { label: string }) {
+  return (
+    <BellOff
+      className="size-3.5 shrink-0 text-muted-foreground/60"
+      aria-label={label}
+    />
+  );
+}
 
 /** Row shell shared by direct chats, groups and topics. */
 function ConversationRow({
@@ -151,6 +169,9 @@ function ChannelRow({
               <p className="truncate font-medium text-foreground">
                 {channel.name}
               </p>
+              {channel.is_muted ? (
+                <MutedIndicator label="Notifications muted" />
+              ) : null}
               {channel.access_level === "private" ? (
                 <Lock
                   className="size-3 shrink-0 text-muted-foreground/70"
@@ -171,6 +192,13 @@ function ChannelRow({
               {topicsLabel} · {membersLabel}
             </p>
           </div>
+
+          {/* Only while collapsed. Once the topics are visible they carry
+              their own counts, and a channel total sitting above a list of
+              the very numbers it adds up is just the same news twice. */}
+          {!isExpanded ? (
+            <UnreadBadge count={channel.unread_count} isMuted={channel.is_muted} />
+          ) : null}
         </Link>
       </div>
 
@@ -211,12 +239,27 @@ function ChannelRow({
                         <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                           {topic.name}
                         </span>
+                        {/* A muted channel silences everything inside it, so
+                            its topics say so too rather than looking loud. */}
+                        {topic.is_muted || channel.is_muted ? (
+                          <MutedIndicator
+                            label={
+                              channel.is_muted
+                                ? "Muted with the channel"
+                                : "Notifications muted"
+                            }
+                          />
+                        ) : null}
                         {!topic.allow_member_messages ? (
                           <Lock
                             className="size-3 shrink-0 text-muted-foreground/70"
                             aria-label="Only admins can post"
                           />
                         ) : null}
+                        <UnreadBadge
+                          count={topic.unread_count}
+                          isMuted={topic.is_muted || channel.is_muted}
+                        />
                       </ConversationRow>
                     </li>
                   );
@@ -472,16 +515,33 @@ function ConversationSidebar({
                       </Avatar>
 
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-medium text-foreground">{name}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="truncate font-medium text-foreground">
+                            {name}
+                          </p>
+                          {chat.is_muted ? (
+                            <MutedIndicator label="Notifications muted" />
+                          ) : null}
+                        </div>
                         <p className="mt-0.5 truncate text-sm text-muted-foreground">
                           {subtitle}
                         </p>
                       </div>
 
-                      <ChevronRight
-                        className="size-4 shrink-0 text-muted-foreground/50"
-                        aria-hidden="true"
-                      />
+                      {/* The badge takes the chevron's place when there is
+                          something waiting: both are trailing affordances, and
+                          showing them together says less than either alone. */}
+                      {chat.unread_count > 0 ? (
+                        <UnreadBadge
+                          count={chat.unread_count}
+                          isMuted={chat.is_muted}
+                        />
+                      ) : (
+                        <ChevronRight
+                          className="size-4 shrink-0 text-muted-foreground/50"
+                          aria-hidden="true"
+                        />
+                      )}
                     </ConversationRow>
                   </AnimatedListItem>
                 );
@@ -516,6 +576,9 @@ function ConversationSidebar({
                           <p className="truncate font-medium text-foreground">
                             {group.name}
                           </p>
+                          {group.is_muted ? (
+                            <MutedIndicator label="Notifications muted" />
+                          ) : null}
                           {group.is_owner ? (
                             <Badge variant="secondary" className="shrink-0">
                               Owner
@@ -527,10 +590,17 @@ function ConversationSidebar({
                         </p>
                       </div>
 
-                      <ChevronRight
-                        className="size-4 shrink-0 text-muted-foreground/50"
-                        aria-hidden="true"
-                      />
+                      {group.unread_count > 0 ? (
+                        <UnreadBadge
+                          count={group.unread_count}
+                          isMuted={group.is_muted}
+                        />
+                      ) : (
+                        <ChevronRight
+                          className="size-4 shrink-0 text-muted-foreground/50"
+                          aria-hidden="true"
+                        />
+                      )}
                     </ConversationRow>
                   </AnimatedListItem>
                 );

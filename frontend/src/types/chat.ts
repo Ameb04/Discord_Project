@@ -2,12 +2,26 @@ import type { PublicUser, Tag } from "./user";
 
 export type ConversationTab = "private" | "groups" | "channels";
 
+/**
+ * How far behind the viewer is in one conversation.
+ *
+ * Both numbers are derived from the read watermark on every request rather
+ * than stored, so they cannot drift out of step with the messages themselves.
+ * `first_unread_message_id` is what the "unread messages" line is drawn above.
+ */
+export type UnreadState = {
+  unread_count: number;
+  first_unread_message_id: number | null;
+};
+
 export type DirectChat = {
   id: number;
   type: "direct";
   created?: boolean;
   other_user: PublicUser;
-};
+  /** The viewer has silenced this chat's notifications. Never affects access. */
+  is_muted: boolean;
+} & UnreadState;
 
 export type GroupAccessLevel = "public" | "private";
 
@@ -21,9 +35,10 @@ export type GroupConversation = {
   avatar_url: string | null;
   member_count: number;
   is_owner: boolean;
+  is_muted: boolean;
   access_level: GroupAccessLevel;
   allow_media: boolean;
-};
+} & UnreadState;
 
 export type GroupMember = {
   user: PublicUser;
@@ -61,10 +76,16 @@ export type Topic = {
   tag: Tag | null;
   avatar_url: string | null;
   channel: number;
+  /**
+   * This topic's own mute only. Its channel can be muted independently, which
+   * silences the topic too — every surface rendering a topic has the channel
+   * beside it, so the two are combined there rather than conflated here.
+   */
+  is_muted: boolean;
   access_level: GroupAccessLevel;
   /** False while admins have the topic closed to everyone but themselves. */
   allow_member_messages: boolean;
-};
+} & UnreadState;
 
 /**
  * A channel as any surface knows it.
@@ -84,6 +105,13 @@ export type ChannelConversation = {
   is_owner: boolean;
   is_admin: boolean;
   is_member: boolean;
+  /** Silences every topic inside, including ones added later. */
+  is_muted: boolean;
+  /**
+   * Everything unread across the topics inside. A channel holds no messages
+   * itself, so it has a total but no "first unread" of its own.
+   */
+  unread_count: number;
   access_level: GroupAccessLevel;
   allow_media: boolean;
 };
@@ -192,7 +220,7 @@ export type ChatHistoryResponse = {
   has_newer: boolean;
   oldest_message_id: number | null;
   newest_message_id: number | null;
-};
+} & UnreadState;
 
 export type ChatHistoryContextResponse = ChatHistoryResponse & {
   focus_message_id: number;

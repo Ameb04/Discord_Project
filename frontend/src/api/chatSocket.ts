@@ -26,7 +26,8 @@ export type LiveChatEvent =
   | LiveMessageDeleted
   | LiveChatRead;
 
-function websocketBaseUrl(): string {
+/** Where every socket in the app hangs off, however the deployment is wired. */
+export function websocketBaseUrl(): string {
   const configuredUrl = import.meta.env.VITE_WS_URL?.trim();
   if (configuredUrl) {
     if (/^wss?:\/\//i.test(configuredUrl)) {

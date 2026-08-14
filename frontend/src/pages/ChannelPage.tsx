@@ -19,7 +19,9 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { deleteTopic, joinChannel } from "@/api/channels";
+import { setChannelMuted } from "@/api/chats";
 import { ChannelInfoDialog } from "@/components/channel/ChannelInfoDialog";
+import { MuteToggleButton } from "@/components/notification/MuteToggleButton";
 import { TopicDialog } from "@/components/channel/TopicDialog";
 import { AnimatedContent } from "@/components/motion/AnimatedContent";
 import { AnimatedListItem, AnimatedListPresence } from "@/components/motion/AnimatedList";
@@ -141,17 +143,28 @@ function ChannelPage({
         </div>
 
         {isMember ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="size-9 shrink-0"
-            aria-label="Channel members and settings"
-            title="Channel info"
-            onClick={() => setIsInfoOpen(true)}
-          >
-            <Settings2 className="size-4" aria-hidden="true" />
-          </Button>
+          <>
+            {/* Muting here covers every topic inside, which is why it sits on
+                the channel's own page rather than only in each topic. */}
+            <MuteToggleButton
+              isMuted={channel.is_muted}
+              conversationLabel={channel.name}
+              onToggle={(muted) => setChannelMuted(channel.id, muted)}
+              onToggled={onTopicsChanged}
+            />
+
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-9 shrink-0"
+              aria-label="Channel members and settings"
+              title="Channel info"
+              onClick={() => setIsInfoOpen(true)}
+            >
+              <Settings2 className="size-4" aria-hidden="true" />
+            </Button>
+          </>
         ) : null}
       </header>
 

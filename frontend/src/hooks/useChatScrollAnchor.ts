@@ -106,6 +106,12 @@ function useChatScrollAnchor({
     if (focusPendingRef.current) {
       focusPendingRef.current = false;
       lastNewestIdRef.current = newestMessageId;
+      // Counts as having anchored. Without this the opening jump is still
+      // "pending" as far as the next render is concerned, and the very next
+      // one — a receipt arriving, a re-render from a refreshed sidebar — falls
+      // into the branch below and throws the reader to the bottom, undoing the
+      // deliberate jump to a search hit or to the first unread message.
+      hasAnchoredRef.current = true;
       return;
     }
 

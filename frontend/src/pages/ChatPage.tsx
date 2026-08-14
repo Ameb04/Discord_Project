@@ -28,8 +28,11 @@ import {
   getChatReadState,
   markChatRead,
   searchChatMessages,
+  setChatMuted,
 } from "../api/chats";
 import { chatWebSocketUrl, parseLiveChatEvent } from "../api/chatSocket";
+import { MuteToggleButton } from "@/components/notification/MuteToggleButton";
+import { useNotifications } from "@/context/NotificationContext";
 import MessageComposer from "../components/chat/MessageComposer";
 import MessageList from "../components/chat/MessageList";
 import {
@@ -67,6 +70,12 @@ type ChatPageProps = {
   /** Present when this chat is a topic, along with the channel that owns it. */
   topic?: Topic;
   topicChannel?: ChannelDetail;
+  /** Whether the viewer has silenced this conversation's notifications. */
+  isMuted?: boolean;
+  /** Called after the mute switch was flipped, so the sidebar can catch up. */
+  onMuteChanged?: () => void;
+  /** Called once this conversation's read watermark has moved forward. */
+  onRead?: () => void;
   /** Called when the group's profile changed elsewhere in this view. */
   onGroupChanged?: (group: GroupDetail) => void;
   /** Called after the owner deletes this group. */
@@ -153,18 +162,49 @@ function ChatPage({
   directPeer,
   topic,
   topicChannel,
+  isMuted = false,
+  onMuteChanged,
+  onRead,
   onGroupChanged,
   onGroupDeleted,
 }: ChatPageProps) {
   const { user } = useAuth();
+  const { setActiveChatId } = useNotifications();
   const navigate = useNavigate();
   const messageRefs = useRef<Record<number, HTMLLIElement | null>>({});
   const historyRef = useRef<HTMLDivElement | null>(null);
+  const unreadDividerRef = useRef<HTMLLIElement | null>(null);
+  /** Set when the unread line still needs bringing into view. */
+  const pendingUnreadScrollRef = useRef(false);
+  /** Set when the next painted list should land at the very end. */
+  const pendingBottomScrollRef = useRef(false);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [isLoadingNewer, setIsLoadingNewer] = useState(false);
+  /**
+   * True while messages exist below the loaded window.
+   *
+   * Only possible when the conversation opened somewhere other than the end —
+   * at the first unread message, or at a search hit — and it is what makes
+   * those landings safe: without a way forward, opening part-way up would
+   * strand the reader above messages they cannot reach.
+   */
+  const [hasNewerMessages, setHasNewerMessages] = useState(false);
+  /**
+   * Where the "unread messages" line is drawn, frozen at the moment the
+   * conversation opened.
+   *
+   * Opening the chat immediately marks it read, so anything derived from live
+   * unread state would erase the line in the same breath as drawing it. The
+   * question it answers — "where was I?" — has one correct answer per visit,
+   * so it is captured once and never revised.
+   */
+  const [unreadDividerMessageId, setUnreadDividerMessageId] = useState<
+    number | null
+  >(null);
   const [error, setError] = useState("");
   const [liveConnectionState, setLiveConnectionState] =
     useState<LiveConnectionState>("connecting");
@@ -233,6 +273,13 @@ function ChatPage({
     messagesRef.current = messages;
   }, [messages]);
 
+  // Read by the socket handler, which must see the current value without the
+  // socket being torn down and reconnected every time the window moves.
+  const hasNewerMessagesRef = useRef(hasNewerMessages);
+  useEffect(() => {
+    hasNewerMessagesRef.current = hasNewerMessages;
+  }, [hasNewerMessages]);
+
   /**
    * Drop a message from every place the view still references it.
    *
@@ -280,6 +327,14 @@ function ChatPage({
     [readState, user?.phone_number]
   );
 
+  // A message arriving in the conversation already on screen needs no toast —
+  // it is about to appear in the list a few pixels away. The provider cannot
+  // know which one that is, so this is where it gets told.
+  useEffect(() => {
+    setActiveChatId(chatId);
+    return () => setActiveChatId(null);
+  }, [chatId, setActiveChatId]);
+
   useEffect(() => {
     let isCurrent = true;
 
@@ -289,17 +344,36 @@ function ChatPage({
       setError("");
 
       try {
-        const history = await getChatMessages(chatId);
-        if (isCurrent) {
-          setMessages((currentMessages) =>
-            mergeMessagesById(currentMessages, history.results)
-          );
-          setHasOlderMessages(history.has_older);
+        // Open where reading left off rather than at the very end. The server
+        // falls back to the newest page when there is nothing unread, so this
+        // is the ordinary case too.
+        const history = await getChatMessages(chatId, { anchor: "unread" });
+        if (!isCurrent) return;
+
+        const firstUnreadId = history.first_unread_message_id;
+        const landsOnUnread =
+          firstUnreadId !== null &&
+          history.results.some((message) => message.id === firstUnreadId);
+
+        if (landsOnUnread) {
+          // Take the bottom anchor out of the way *before* the rows paint, or
+          // it scrolls to the end in the same frame we are trying to land
+          // somewhere else.
+          suspendAutoScroll();
+          pendingUnreadScrollRef.current = true;
+          setUnreadDividerMessageId(firstUnreadId);
         }
+
+        setMessages((currentMessages) =>
+          mergeMessagesById(currentMessages, history.results)
+        );
+        setHasOlderMessages(history.has_older);
+        setHasNewerMessages(history.has_newer);
       } catch (err) {
         if (isCurrent) {
           setMessages([]);
           setHasOlderMessages(false);
+          setHasNewerMessages(false);
           setError(extractChatError(err));
         }
       } finally {
@@ -312,7 +386,30 @@ function ChatPage({
     return () => {
       isCurrent = false;
     };
-  }, [chatId]);
+  }, [chatId, suspendAutoScroll]);
+
+  /**
+   * Land the view where the last load intended, once the rows exist.
+   *
+   * Both destinations are requested by whoever kicked off the fetch and
+   * consumed here, on the render that finally paints them. Refs rather than
+   * state: setting them must not itself cause a render, and the effect has to
+   * be free to re-run on the render that brings the target into being.
+   */
+  useEffect(() => {
+    if (pendingUnreadScrollRef.current) {
+      const node = unreadDividerRef.current;
+      if (!node) return;
+      pendingUnreadScrollRef.current = false;
+      node.scrollIntoView({ block: "center" });
+      return;
+    }
+
+    if (pendingBottomScrollRef.current && messages.length > 0) {
+      pendingBottomScrollRef.current = false;
+      scrollToBottom();
+    }
+  }, [messages, scrollToBottom]);
 
   useEffect(() => {
     let socket: WebSocket | null = null;
@@ -403,6 +500,12 @@ function ChatPage({
 
         if (liveEvent.type === "message.created") {
           if (liveEvent.message.chat !== chatId) return;
+          // While the window sits away from the tail — opened at the first
+          // unread, say — an arriving message belongs past its far edge.
+          // Appending it here would place it directly after the loaded rows
+          // and silently imply nothing came between. It is reached by paging
+          // forward or jumping to the end, which load the gap as well.
+          if (hasNewerMessagesRef.current) return;
           setMessages((currentMessages) =>
             mergeMessagesById(currentMessages, [liveEvent.message])
           );
@@ -504,6 +607,10 @@ function ChatPage({
     async function reportRead() {
       try {
         await markChatRead(chatId, newestMessageId ?? undefined);
+        // The sidebar's badge for this chat is now wrong by exactly what was
+        // just read. Only the id is reported, never more, so a window opened
+        // part-way up does not claim the messages below it have been seen.
+        onRead?.();
       } catch {
         // A missed receipt is not worth surfacing, and the watermark only
         // moves forward — the next message reports this one too.
@@ -511,7 +618,7 @@ function ChatPage({
     }
 
     void reportRead();
-  }, [chatId, newestMessageId]);
+  }, [chatId, newestMessageId, onRead]);
 
   const focusMessage = useCallback((messageId: number) => {
     focusNonceRef.current += 1;
@@ -536,6 +643,9 @@ function ChatPage({
         const context = await getChatMessageContext(chatId, messageId);
         setMessages(context.results);
         setHasOlderMessages(context.has_older);
+        // A hit from further back leaves the tail unloaded, so the way forward
+        // has to be offered — otherwise the reader is stranded at the match.
+        setHasNewerMessages(context.has_newer);
         setError("");
         focusMessage(context.focus_message_id);
       } catch (err) {
@@ -643,7 +753,47 @@ function ChatPage({
     goToResult(searchResults, nextIndex);
   }
 
+  /**
+   * Go to the newest message, fetching the end of the conversation if the
+   * loaded window does not reach it.
+   *
+   * Scrolling alone is only "latest" when the tail is already loaded. Opening
+   * at the first unread deliberately leaves it unloaded, so the button that
+   * promises the latest has to be able to go and get it.
+   */
+  async function jumpToLatest() {
+    if (!hasNewerMessages) {
+      scrollToBottom("smooth");
+      return;
+    }
+
+    try {
+      const history = await getChatMessages(chatId);
+      // Replaced rather than merged: the window is moving to a different part
+      // of the conversation, and keeping the old rows would leave a gap
+      // between them and the new ones with nothing to say it is there.
+      // The landing is requested explicitly so the anchor does not also try,
+      // which would scroll twice for one intent.
+      suspendAutoScroll();
+      pendingBottomScrollRef.current = true;
+      setMessages(history.results);
+      setHasOlderMessages(history.has_older);
+      setHasNewerMessages(history.has_newer);
+      setError("");
+    } catch (err) {
+      setError(extractChatError(err));
+    }
+  }
+
   function handleMessageSent(message: ChatMessage) {
+    // Sending from a window that is not at the end would drop your own message
+    // beyond its edge, where you could not see it. Go to the end instead — it
+    // is where you were headed by sending.
+    if (hasNewerMessages) {
+      void jumpToLatest();
+      return;
+    }
+
     setMessages((currentMessages) =>
       mergeMessagesById(currentMessages, [message])
     );
@@ -686,6 +836,39 @@ function ChatPage({
       setError(extractChatError(err));
     } finally {
       setIsLoadingOlder(false);
+    }
+  }
+
+  /**
+   * Pull in the page below the loaded window.
+   *
+   * The mirror of `handleLoadOlder`, and needed for the same reason in
+   * reverse: a conversation opened at the first unread message has messages
+   * *after* the window, which nothing else in this view can reach.
+   */
+  async function handleLoadNewer() {
+    if (isLoadingNewer || !hasNewerMessages || messages.length === 0) return;
+
+    setIsLoadingNewer(true);
+    setError("");
+
+    try {
+      const newestLoadedId = messages[messages.length - 1]?.id;
+      if (!newestLoadedId) return;
+
+      const history = await getChatMessages(chatId, { after: newestLoadedId });
+      // The reader is at the end of the current window, so the tail moving
+      // would otherwise read as "new message arrived" and scroll them straight
+      // past the page they just asked for.
+      suspendAutoScroll();
+      setMessages((currentMessages) =>
+        mergeMessagesById(currentMessages, history.results)
+      );
+      setHasNewerMessages(history.has_newer);
+    } catch (err) {
+      setError(extractChatError(err));
+    } finally {
+      setIsLoadingNewer(false);
     }
   }
 
@@ -826,6 +1009,18 @@ function ChatPage({
           {statusLine}
         </div>
 
+        <MuteToggleButton
+          isMuted={isMuted}
+          conversationLabel={headerTitle}
+          inheritedMuteReason={
+            topicChannel?.is_muted
+              ? `Muted with the whole ${topicChannel.name} channel`
+              : undefined
+          }
+          onToggle={(muted) => setChatMuted(chatId, muted)}
+          onToggled={onMuteChanged}
+        />
+
         <Button
           type="button"
           variant={isSearchOpen ? "default" : "outline"}
@@ -945,7 +1140,35 @@ function ChatPage({
               highlightQuery={isSearchOpen ? searchedQuery : null}
               highlightMessageId={focusedMessage?.id ?? null}
               messageRefs={messageRefs}
+              unreadDividerMessageId={unreadDividerMessageId}
+              unreadDividerRef={(node) => {
+                unreadDividerRef.current = node;
+              }}
             />
+          ) : null}
+
+          {!isLoading && !error && hasNewerMessages ? (
+            <div className="mt-5 flex justify-center">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isLoadingNewer}
+                onClick={() => void handleLoadNewer()}
+              >
+                {isLoadingNewer ? (
+                  <>
+                    <LoaderCircle className="size-4 animate-spin" />
+                    Loading newer...
+                  </>
+                ) : (
+                  <>
+                    <ArrowDown className="size-4" />
+                    Load newer messages
+                  </>
+                )}
+              </Button>
+            </div>
           ) : null}
         </div>
 
@@ -953,7 +1176,10 @@ function ChatPage({
             that says "jump to latest" while you are looking at the latest is
             noise. */}
         <AnimatePresence>
-          {!isLoading && !error && messages.length > 0 && !isAtBottom ? (
+          {!isLoading &&
+          !error &&
+          messages.length > 0 &&
+          (!isAtBottom || hasNewerMessages) ? (
             <motion.div
               key="jump-to-latest"
               initial={{ opacity: 0, y: 8, scale: 0.95 }}
@@ -969,7 +1195,7 @@ function ChatPage({
                 className="size-10 rounded-full shadow-lg shadow-black/40 backdrop-blur-sm"
                 aria-label="Jump to the newest message"
                 title="Jump to latest"
-                onClick={() => scrollToBottom("smooth")}
+                onClick={() => void jumpToLatest()}
               >
                 <ArrowDown className="size-4" aria-hidden="true" />
               </Button>
